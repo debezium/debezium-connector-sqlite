@@ -10,6 +10,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import io.debezium.jdbc.JdbcConfiguration;
@@ -79,6 +81,26 @@ public final class SqliteTestHelper implements AutoCloseable {
     /** The path of the temporary database file. */
     public Path databaseFile() {
         return databaseFile;
+    }
+
+    /**
+     * Installs CDC triggers on a source table so its changes are captured into
+     * {@code _debezium_cdc_log}. The table's columns are read from {@code PRAGMA table_info}, and the
+     * insert, update, and delete triggers built from them are run against the database. The table
+     * must already exist.
+     *
+     * @param table the source table to capture changes from
+     * @throws SQLException if the columns cannot be read or the triggers cannot be created
+     */
+    public void installTriggers(String table) throws SQLException {
+        List<String> columns = connection.queryAndMap("PRAGMA table_info(" + table + ")", rs -> {
+            List<String> names = new ArrayList<>();
+            while (rs.next()) {
+                names.add(rs.getString("name"));
+            }
+            return names;
+        });
+        connection.execute(TriggerGenerator.createTriggers(table, columns).toArray(new String[0]));
     }
 
     /**
