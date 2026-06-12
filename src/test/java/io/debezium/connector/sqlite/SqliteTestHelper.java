@@ -10,9 +10,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.UUID;
 
 import io.debezium.jdbc.JdbcConfiguration;
 import io.debezium.jdbc.JdbcConnection;
+import io.debezium.util.Testing;
 
 /**
  * A throwaway SQLite database for integration tests.
@@ -51,7 +53,7 @@ public final class SqliteTestHelper implements AutoCloseable {
      * @throws SQLException if the database cannot be opened or initialized
      */
     public static SqliteTestHelper create() throws IOException, SQLException {
-        Path databaseFile = Files.createTempFile("debezium-sqlite-", ".db");
+        Path databaseFile = Testing.Files.createTestingFile("sqlite/" + UUID.randomUUID() + ".db").toPath();
         JdbcConnection connection = new JdbcConnection(
                 JdbcConfiguration.empty(),
                 config -> DriverManager.getConnection("jdbc:sqlite:" + databaseFile),
