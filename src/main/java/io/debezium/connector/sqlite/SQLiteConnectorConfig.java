@@ -10,7 +10,7 @@ import java.util.Optional;
 
 import org.apache.kafka.common.config.ConfigDef;
 
-import io.debezium.config.CommonConnectorConfig;
+import io.debezium.config.ConfigDefinition;
 import io.debezium.config.Configuration;
 import io.debezium.config.EnumeratedValue;
 import io.debezium.config.Field;
@@ -24,8 +24,9 @@ import io.debezium.relational.Tables.TableFilter;
 /**
  * Configuration for the SQLite connector.
  *
- * <p>Add connector-specific {@link Field} constants here. Each field must be documented
- * and included in {@link #ALL_FIELDS} and {@link #configDef()}.
+ * <p>Add connector-specific {@link Field} constants here. Each field must be documented and
+ * registered with {@link #CONFIG_DEFINITION}, which derives both {@link #ALL_FIELDS} and
+ * {@link #configDef()} so the field set cannot drift between them.
  */
 public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
 
@@ -74,12 +75,13 @@ public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
     }
 
     /** Path to the SQLite database file that the connector will monitor. */
-    public static final Field DATABASE_FILE = Field.create("database.dbname")
+    public static final Field DATABASE_FILE = Field.create("database.file.path")
             .withDisplayName("Database file path")
             .withType(ConfigDef.Type.STRING)
             .withImportance(ConfigDef.Importance.HIGH)
             .withDescription("Path to the SQLite database file to monitor.");
 
+    /** Whether to take an initial snapshot of existing table data before streaming changes. */
     public static final Field SNAPSHOT_MODE = Field.create("snapshot.mode")
             .withDisplayName("Snapshot mode")
             .withEnum(SnapshotMode.class, SnapshotMode.INITIAL)
@@ -88,14 +90,20 @@ public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
                     + "Options include: 'initial' (default) to snapshot only when no offset exists; "
                     + "'never' to skip snapshot entirely.");
 
-    public static final Field.Set ALL_FIELDS = Field.setOf(
-            CommonConnectorConfig.TOPIC_PREFIX,
-            DATABASE_FILE,
-            SNAPSHOT_MODE,
-            RelationalDatabaseConnectorConfig.TABLE_INCLUDE_LIST,
-            RelationalDatabaseConnectorConfig.TABLE_EXCLUDE_LIST,
-            RelationalDatabaseConnectorConfig.COLUMN_INCLUDE_LIST,
-            RelationalDatabaseConnectorConfig.COLUMN_EXCLUDE_LIST);
+    /**
+     * The connector's configuration, built on the relational base definition. {@code type} fields
+     * describe how to reach the database, {@code connector} fields tune behavior, and SQLite has no
+     * schemas so the schema include and exclude lists are excluded.
+     */
+    private static final ConfigDefinition CONFIG_DEFINITION = RelationalDatabaseConnectorConfig.CONFIG_DEFINITION.edit()
+            .name("SQLite")
+            .type(DATABASE_FILE)
+            .connector(SNAPSHOT_MODE)
+            .excluding(SCHEMA_INCLUDE_LIST, SCHEMA_EXCLUDE_LIST)
+            .create();
+
+    /** The full set of fields the connector accepts, derived from {@link #CONFIG_DEFINITION}. */
+    public static final Field.Set ALL_FIELDS = Field.setOf(CONFIG_DEFINITION.all());
 
     /** Tables that are always excluded from monitoring (SQLite internals and the CDC log itself). */
     private static final TableFilter SYSTEM_TABLES_FILTER = TableFilter.fromPredicate(t -> t.table().startsWith("sqlite_")
@@ -112,16 +120,7 @@ public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
     }
 
     public static ConfigDef configDef() {
-        ConfigDef configDef = new ConfigDef();
-        Field.group(configDef, "SQLite", DATABASE_FILE);
-        Field.group(configDef, "Connector", CommonConnectorConfig.TOPIC_PREFIX);
-        Field.group(configDef, "Snapshots", SNAPSHOT_MODE);
-        Field.group(configDef, "Filtering",
-                RelationalDatabaseConnectorConfig.TABLE_INCLUDE_LIST,
-                RelationalDatabaseConnectorConfig.TABLE_EXCLUDE_LIST,
-                RelationalDatabaseConnectorConfig.COLUMN_INCLUDE_LIST,
-                RelationalDatabaseConnectorConfig.COLUMN_EXCLUDE_LIST);
-        return configDef;
+        return CONFIG_DEFINITION.configDef();
     }
 
     @Override
