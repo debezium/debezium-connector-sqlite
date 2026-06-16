@@ -79,6 +79,7 @@ public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
             .withDisplayName("Database file path")
             .withType(ConfigDef.Type.STRING)
             .withImportance(ConfigDef.Importance.HIGH)
+            .required()
             .withDescription("Path to the SQLite database file to monitor.");
 
     /** Default per-poll row limit when reading the CDC log table. */

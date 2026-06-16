@@ -34,8 +34,8 @@ public class SQLiteConnection extends JdbcConnection {
     /** SQLite quotes identifiers with double quotes. */
     private static final String IDENTIFIER_QUOTE = "\"";
 
-    /** The mode {@code PRAGMA journal_mode=WAL} reports back once WAL is active. */
-    private static final String JOURNAL_MODE_WAL = "wal";
+    /** The mode {@code PRAGMA journal_mode} reports while WAL is active. */
+    public static final String JOURNAL_MODE_WAL = "wal";
 
     /**
      * The connector requires SQLite 3.35.0 or later. That release added
@@ -71,6 +71,17 @@ public class SQLiteConnection extends JdbcConnection {
             throw new DebeziumException("Failed to set WAL journal mode (SQLite reported '" + mode
                     + "'). Another connection may hold an exclusive lock on the database file.");
         }
+    }
+
+    /**
+     * Reads the current journal mode without changing it, for callers that want to inspect the mode
+     * rather than enforce it.
+     *
+     * @return the value {@code PRAGMA journal_mode} reports, or null if the pragma returns no row
+     * @throws SQLException if the pragma cannot be run
+     */
+    public String journalMode() throws SQLException {
+        return queryAndMap("PRAGMA journal_mode", rs -> rs.next() ? rs.getString(1) : null);
     }
 
     /**

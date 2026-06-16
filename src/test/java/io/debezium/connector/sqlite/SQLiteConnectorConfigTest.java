@@ -8,11 +8,14 @@ package io.debezium.connector.sqlite;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.Map;
 import java.util.Set;
 
+import org.apache.kafka.common.config.ConfigValue;
 import org.junit.jupiter.api.Test;
 
 import io.debezium.config.CommonConnectorConfig;
+import io.debezium.config.Configuration;
 import io.debezium.connector.sqlite.SQLiteConnectorConfig.SnapshotMode;
 import io.debezium.relational.RelationalDatabaseConnectorConfig;
 
@@ -29,6 +32,13 @@ class SQLiteConnectorConfigTest {
     @Test
     void topicPrefixIsAccepted() {
         assertThat(ALL_FIELD_NAMES).contains(CommonConnectorConfig.TOPIC_PREFIX.name());
+    }
+
+    @Test
+    void databaseFilePathIsRequired() {
+        Map<String, ConfigValue> results = Configuration.from(Map.of(CommonConnectorConfig.TOPIC_PREFIX.name(), "test"))
+                .validate(SQLiteConnectorConfig.ALL_FIELDS);
+        assertThat(results.get(SQLiteConnectorConfig.DATABASE_FILE.name()).errorMessages()).isNotEmpty();
     }
 
     @Test
