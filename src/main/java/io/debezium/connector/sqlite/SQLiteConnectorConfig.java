@@ -81,6 +81,25 @@ public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
             .withImportance(ConfigDef.Importance.HIGH)
             .withDescription("Path to the SQLite database file to monitor.");
 
+    /** Default per-poll row limit when reading the CDC log table. */
+    public static final int DEFAULT_CDC_LOG_BATCH_SIZE = 1000;
+
+    /**
+     * Maximum number of rows to read from {@code _debezium_cdc_log} per streaming poll. This is the
+     * {@code LIMIT} on the CDC-log read, kept small so each read transaction stays short and SQLite
+     * can checkpoint the WAL between polls. It is separate from the inherited {@code max.batch.size},
+     * which bounds how many records the change-event queue hands to Kafka Connect per poll; the two
+     * are decoupled by the queue buffer.
+     */
+    public static final Field CDC_LOG_BATCH_SIZE = Field.create("cdc.log.batch.size")
+            .withDisplayName("CDC log batch size")
+            .withType(ConfigDef.Type.INT)
+            .withImportance(ConfigDef.Importance.MEDIUM)
+            .withDefault(DEFAULT_CDC_LOG_BATCH_SIZE)
+            .withValidation(Field::isPositiveInteger)
+            .withDescription("Maximum number of rows to read from the CDC log table per poll. "
+                    + "Defaults to " + DEFAULT_CDC_LOG_BATCH_SIZE + ".");
+
     /** Whether to take an initial snapshot of existing table data before streaming changes. */
     public static final Field SNAPSHOT_MODE = Field.create("snapshot.mode")
             .withDisplayName("Snapshot mode")
@@ -98,7 +117,7 @@ public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
     private static final ConfigDefinition CONFIG_DEFINITION = RelationalDatabaseConnectorConfig.CONFIG_DEFINITION.edit()
             .name("SQLite")
             .type(DATABASE_FILE)
-            .connector(SNAPSHOT_MODE)
+            .connector(SNAPSHOT_MODE, CDC_LOG_BATCH_SIZE)
             .excluding(SCHEMA_INCLUDE_LIST, SCHEMA_EXCLUDE_LIST)
             .create();
 
