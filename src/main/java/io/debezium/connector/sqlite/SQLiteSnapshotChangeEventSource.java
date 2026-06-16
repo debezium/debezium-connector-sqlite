@@ -16,13 +16,14 @@ import io.debezium.pipeline.source.SnapshottingTask;
 import io.debezium.pipeline.source.spi.ChangeEventSource.ChangeEventSourceContext;
 import io.debezium.pipeline.source.spi.SnapshotChangeEventSource;
 import io.debezium.pipeline.spi.SnapshotResult;
+import io.debezium.snapshot.SnapshotterService;
 
 /**
- * Performs an initial snapshot of the SQLite data source.
+ * Performs the initial snapshot of the SQLite data source.
  *
- * <p>Override {@link #execute} in Phase 1 to read existing table rows via JDBC and emit READ
- * events through the {@link io.debezium.pipeline.EventDispatcher}. When the snapshot is done,
- * update the offset context so streaming resumes at the correct {@code change_id}.
+ * <p>This is a stub: it makes the snapshot decision and threads the offset through, but does not yet
+ * read any table rows. The snapshot decision is delegated to the {@link SnapshotterService} resolved
+ * from {@code snapshot.mode}, matching how the other Debezium connectors decide.
  */
 class SQLiteSnapshotChangeEventSource
         implements SnapshotChangeEventSource<SQLitePartition, SQLiteOffsetContext> {
@@ -30,17 +31,19 @@ class SQLiteSnapshotChangeEventSource
     private static final Logger LOGGER = LoggerFactory.getLogger(SQLiteSnapshotChangeEventSource.class);
 
     private final SQLiteConnectorConfig config;
+    private final SnapshotterService snapshotterService;
 
-    SQLiteSnapshotChangeEventSource(SQLiteConnectorConfig config) {
+    SQLiteSnapshotChangeEventSource(SQLiteConnectorConfig config, SnapshotterService snapshotterService) {
         this.config = config;
+        this.snapshotterService = snapshotterService;
     }
 
     @Override
     public SnapshottingTask getSnapshottingTask(SQLitePartition partition, SQLiteOffsetContext offsetContext) {
-        boolean shouldSnapshot = config.getSnapshotMode().shouldSnapshotData(
-                offsetContext.getChangeId() != 0, false);
+        boolean offsetExists = offsetContext != null;
+        boolean shouldSnapshot = snapshotterService.getSnapshotter().shouldSnapshotData(offsetExists, false);
         LOGGER.info("Snapshot decision: shouldSnapshot={}", shouldSnapshot);
-        return new SnapshottingTask(shouldSnapshot, false, List.of(), Map.of(), false);
+        return new SnapshottingTask(shouldSnapshot, shouldSnapshot, List.of(), Map.of(), false);
     }
 
     @Override
@@ -56,14 +59,17 @@ class SQLiteSnapshotChangeEventSource
                                                        SQLiteOffsetContext offsetContext,
                                                        SnapshottingTask task)
             throws InterruptedException {
+        // On a first run there is no stored offset, so start from the beginning of the CDC log.
+        SQLiteOffsetContext effectiveOffset = offsetContext != null ? offsetContext : SQLiteOffsetContext.initial(config);
+
         if (task.shouldSkipSnapshot()) {
-            LOGGER.info("Skipping snapshot — resuming streaming from change_id {}", offsetContext.getChangeId());
-            return SnapshotResult.skipped(offsetContext);
+            LOGGER.info("Skipping snapshot, resuming streaming from change_id {}", effectiveOffset.getChangeId());
+            return SnapshotResult.skipped(effectiveOffset);
         }
 
+        // The data snapshot is not implemented yet; this stub completes without reading any rows.
         LOGGER.info("Starting SQLite snapshot");
-        // TODO: implement snapshot in Phase 1.
         LOGGER.info("SQLite snapshot complete");
-        return SnapshotResult.completed(offsetContext);
+        return SnapshotResult.completed(effectiveOffset);
     }
 }

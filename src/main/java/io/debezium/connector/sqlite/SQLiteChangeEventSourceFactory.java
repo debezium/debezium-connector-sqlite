@@ -10,6 +10,7 @@ import io.debezium.pipeline.source.spi.ChangeEventSourceFactory;
 import io.debezium.pipeline.source.spi.SnapshotChangeEventSource;
 import io.debezium.pipeline.source.spi.SnapshotProgressListener;
 import io.debezium.pipeline.source.spi.StreamingChangeEventSource;
+import io.debezium.snapshot.SnapshotterService;
 
 /**
  * Creates the snapshot and streaming change event sources for the SQLite connector.
@@ -21,16 +22,18 @@ class SQLiteChangeEventSourceFactory
         implements ChangeEventSourceFactory<SQLitePartition, SQLiteOffsetContext> {
 
     private final SQLiteConnectorConfig config;
+    private final SnapshotterService snapshotterService;
 
-    SQLiteChangeEventSourceFactory(SQLiteConnectorConfig config) {
+    SQLiteChangeEventSourceFactory(SQLiteConnectorConfig config, SnapshotterService snapshotterService) {
         this.config = config;
+        this.snapshotterService = snapshotterService;
     }
 
     @Override
     public SnapshotChangeEventSource<SQLitePartition, SQLiteOffsetContext> getSnapshotChangeEventSource(
                                                                                                         SnapshotProgressListener<SQLitePartition> progressListener,
                                                                                                         NotificationService<SQLitePartition, SQLiteOffsetContext> notificationService) {
-        return new SQLiteSnapshotChangeEventSource(config);
+        return new SQLiteSnapshotChangeEventSource(config, snapshotterService);
     }
 
     @Override

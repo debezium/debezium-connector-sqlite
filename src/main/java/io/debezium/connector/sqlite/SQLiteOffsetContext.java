@@ -31,6 +31,17 @@ public class SQLiteOffsetContext extends CommonOffsetContext<SQLiteSourceInfo> {
         super(sourceInfo);
     }
 
+    /**
+     * Creates the offset context for a connector that has never run, positioned before the first
+     * {@code change_id}.
+     *
+     * @param config the connector configuration, used to build the source info
+     * @return a fresh offset context at {@code change_id} 0
+     */
+    public static SQLiteOffsetContext initial(SQLiteConnectorConfig config) {
+        return new SQLiteOffsetContext(new SQLiteSourceInfo(config));
+    }
+
     /** Returns the last {@code change_id} consumed from {@code _debezium_cdc_log}. */
     public long getChangeId() {
         return changeId;
