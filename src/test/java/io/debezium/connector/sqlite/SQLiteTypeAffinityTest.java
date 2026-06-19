@@ -12,6 +12,8 @@ import static io.debezium.connector.sqlite.SQLiteTypeAffinity.REAL;
 import static io.debezium.connector.sqlite.SQLiteTypeAffinity.TEXT;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.sql.Types;
+
 import org.junit.jupiter.api.Test;
 
 /**
@@ -79,5 +81,14 @@ public class SQLiteTypeAffinityTest {
         assertThat(SQLiteTypeAffinity.of("Integer")).isEqualTo(INTEGER);
         assertThat(SQLiteTypeAffinity.of("tExT")).isEqualTo(TEXT);
         assertThat(SQLiteTypeAffinity.of("Double")).isEqualTo(REAL);
+    }
+
+    @Test
+    void mapsEachAffinityToItsJdbcType() {
+        assertThat(INTEGER.jdbcType()).isEqualTo(Types.BIGINT);
+        assertThat(REAL.jdbcType()).isEqualTo(Types.DOUBLE);
+        assertThat(TEXT.jdbcType()).isEqualTo(Types.VARCHAR);
+        assertThat(BLOB.jdbcType()).isEqualTo(Types.VARBINARY);
+        assertThat(NUMERIC.jdbcType()).isEqualTo(Types.NUMERIC);
     }
 }

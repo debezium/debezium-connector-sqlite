@@ -5,6 +5,7 @@
  */
 package io.debezium.connector.sqlite;
 
+import java.sql.Types;
 import java.util.Locale;
 
 import io.debezium.util.Strings;
@@ -30,11 +31,29 @@ import io.debezium.util.Strings;
  */
 enum SQLiteTypeAffinity {
 
-    INTEGER,
-    TEXT,
-    BLOB,
-    REAL,
-    NUMERIC;
+    INTEGER(Types.BIGINT),
+    TEXT(Types.VARCHAR),
+    BLOB(Types.VARBINARY),
+    REAL(Types.DOUBLE),
+    NUMERIC(Types.NUMERIC);
+
+    private final int jdbcType;
+
+    SQLiteTypeAffinity(int jdbcType) {
+        this.jdbcType = jdbcType;
+    }
+
+    /**
+     * The JDBC type ({@link Types}) a column of this affinity is given, used to correct the
+     * driver-reported type so a column's JDBC type stays consistent with its affinity:
+     * INTEGER to {@code BIGINT}, REAL to {@code DOUBLE}, TEXT to {@code VARCHAR}, BLOB to
+     * {@code VARBINARY}, and NUMERIC to {@code NUMERIC}.
+     *
+     * @return the {@link Types} constant for this affinity
+     */
+    int jdbcType() {
+        return jdbcType;
+    }
 
     /**
      * Resolves the affinity of a column from its declared type string, applying SQLite's five
