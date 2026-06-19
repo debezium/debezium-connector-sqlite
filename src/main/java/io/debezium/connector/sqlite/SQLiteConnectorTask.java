@@ -98,6 +98,12 @@ public class SQLiteConnectorTask extends BaseSourceTask<SQLitePartition, SQLiteO
         }
 
         this.schema = new SQLiteDatabaseSchema(taskContext, topicNamingStrategy);
+        try {
+            this.schema.refresh(connection);
+        }
+        catch (SQLException e) {
+            throw new DebeziumException("Failed to load the SQLite schema from " + databaseFilePath, e);
+        }
 
         final Offsets<SQLitePartition, SQLiteOffsetContext> previousOffsets = getPreviousOffsets(
                 new SQLitePartition.Provider(connectorConfig),
