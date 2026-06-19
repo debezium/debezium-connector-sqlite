@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import io.debezium.DebeziumException;
 import io.debezium.jdbc.JdbcConfiguration;
 import io.debezium.jdbc.JdbcConnection;
+import io.debezium.relational.ColumnEditor;
 
 /**
  * A JDBC connection to a single SQLite database file.
@@ -92,6 +93,23 @@ public class SQLiteConnection extends JdbcConnection {
      */
     public void createCdcLogTable() throws SQLException {
         execute(CdcLog.CREATE_TABLE_DDL);
+    }
+
+    /**
+     * Resets a column's JDBC type from its declared type using SQLite's affinity rules, replacing the
+     * type the JDBC driver reports. The driver's type ignores affinity: it returns a {@code BLOB}
+     * column and a column with no declared type as {@code VARCHAR} and a {@code BOOLEAN} as
+     * {@code INTEGER}. The connector's schema builder and value converter both resolve the affinity
+     * from the declared type string, so they do not depend on this corrected JDBC type. The
+     * correction is defensive: it keeps the column's JDBC type consistent with its affinity for any
+     * framework path that falls back to the driver-reported type.
+     *
+     * @param column the column editor seeded from the driver metadata
+     * @return the column editor with its JDBC type corrected to the affinity's type
+     */
+    @Override
+    protected ColumnEditor overrideColumn(ColumnEditor column) {
+        return column.jdbcType(SQLiteTypeAffinity.of(column.typeName()).jdbcType());
     }
 
     /**
