@@ -13,23 +13,33 @@ import io.debezium.relational.ValueConverter;
 import io.debezium.relational.ValueConverterProvider;
 
 /**
- * Maps SQLite column types to Kafka Connect schemas and converts column values.
+ * Maps SQLite columns to Kafka Connect schemas and converts column values, switching on the
+ * column's {@link SQLiteTypeAffinity}.
  *
- * <p>Stub implementation for Phase 0. Full type mapping (INTEGER, REAL, TEXT, BLOB, NUMERIC)
- * is implemented in Phase 1.
+ * <p>{@link #schemaBuilder(Column)} returns the Connect schema for a column's affinity. The value
+ * converter still passes values through unchanged; per-affinity coercion is applied where rows are
+ * read, not here.
  */
 class SQLiteValueConverter implements ValueConverterProvider {
 
     /**
-     * Returns a {@link SchemaBuilder} for the given SQLite column type.
+     * Returns the Kafka Connect {@link SchemaBuilder} for a column, chosen by its SQLite affinity:
+     * INTEGER to {@code INT64}, REAL and NUMERIC to {@code FLOAT64}, TEXT to {@code STRING}, and
+     * BLOB to {@code BYTES}. NUMERIC maps to {@code FLOAT64} because it matches SQLite's own numeric
+     * storage and keeps the schema simple. The builder is returned without an optional flag, since
+     * {@code TableSchemaBuilder} sets nullability from the column.
      *
      * @param column the column definition
-     * @return the schema builder, or {@code null} if the type is not yet mapped
+     * @return the schema builder for the column's affinity
      */
     @Override
     public SchemaBuilder schemaBuilder(Column column) {
-        // TODO: map SQLite affinities (INTEGER, REAL, TEXT, BLOB, NUMERIC) in Phase 1.
-        return null;
+        return switch (SQLiteTypeAffinity.of(column.typeName())) {
+            case INTEGER -> SchemaBuilder.int64();
+            case REAL, NUMERIC -> SchemaBuilder.float64();
+            case TEXT -> SchemaBuilder.string();
+            case BLOB -> SchemaBuilder.bytes();
+        };
     }
 
     /**
