@@ -125,9 +125,16 @@ public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
     /** The full set of fields the connector accepts, derived from {@link #CONFIG_DEFINITION}. */
     public static final Field.Set ALL_FIELDS = Field.setOf(CONFIG_DEFINITION.all());
 
-    /** Tables that are always excluded from monitoring (SQLite internals and the CDC log itself). */
-    private static final TableFilter SYSTEM_TABLES_FILTER = TableFilter.fromPredicate(t -> t.table().startsWith("sqlite_")
-            || t.table().equals(CdcLog.TABLE_NAME));
+    /** Prefix reserved for the connector's internal tables, always excluded from monitoring. */
+    private static final String DEBEZIUM_TABLE_PREFIX = "_debezium_";
+
+    /**
+     * Keeps user tables under monitoring and always excludes SQLite internals ({@code sqlite_}) and
+     * the connector's own {@code _debezium_} tables. The framework monitors a table only when this
+     * returns true, so the predicate is true for the tables to keep, not for the ones to drop.
+     */
+    private static final TableFilter SYSTEM_TABLES_FILTER = TableFilter.fromPredicate(t -> !t.table().startsWith("sqlite_")
+            && !t.table().startsWith(DEBEZIUM_TABLE_PREFIX));
 
     /** Maps a {@code TableId} to its string form for include/exclude list matching. */
     private static final TableIdToStringMapper TABLE_ID_MAPPER = TableId::table;

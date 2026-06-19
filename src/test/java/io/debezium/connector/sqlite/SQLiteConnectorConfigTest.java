@@ -18,6 +18,7 @@ import io.debezium.config.CommonConnectorConfig;
 import io.debezium.config.Configuration;
 import io.debezium.connector.sqlite.SQLiteConnectorConfig.SnapshotMode;
 import io.debezium.relational.RelationalDatabaseConnectorConfig;
+import io.debezium.relational.TableId;
 
 class SQLiteConnectorConfigTest {
 
@@ -73,5 +74,32 @@ class SQLiteConnectorConfigTest {
         assertThat(SnapshotMode.parse("INITIAL")).isEqualTo(SnapshotMode.INITIAL);
         assertThatThrownBy(() -> SnapshotMode.parse("bogus"))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private static boolean isMonitored(String table) {
+        Configuration config = Configuration.from(Map.of(
+                SQLiteConnectorConfig.DATABASE_FILE.name(), "/tmp/test.db",
+                CommonConnectorConfig.TOPIC_PREFIX.name(), "test"));
+        return new SQLiteConnectorConfig(config).getTableFilters().dataCollectionFilter()
+                .isIncluded(new TableId(null, null, table));
+    }
+
+    @Test
+    void monitorsUserTables() {
+        assertThat(isMonitored("orders")).isTrue();
+    }
+
+    @Test
+    void alwaysExcludesSqliteInternalTables() {
+        assertThat(isMonitored("sqlite_sequence")).isFalse();
+        assertThat(isMonitored("sqlite_master")).isFalse();
+    }
+
+    @Test
+    void alwaysExcludesEveryDebeziumPrefixedTable() {
+        // The always-exclude is the _debezium_ prefix, not just the cdc log name, so any internal
+        // table the connector might add is excluded too.
+        assertThat(isMonitored("_debezium_cdc_log")).isFalse();
+        assertThat(isMonitored("_debezium_signal")).isFalse();
     }
 }
