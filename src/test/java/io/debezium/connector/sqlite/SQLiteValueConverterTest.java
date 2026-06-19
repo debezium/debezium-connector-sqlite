@@ -44,4 +44,26 @@ public class SQLiteValueConverterTest {
         // schemaBuilder returns a required schema; TableSchemaBuilder applies optional() from the column.
         assertThat(schemaFor("VARCHAR").isOptional()).isFalse();
     }
+
+    private Object convert(String declaredType, Object data) {
+        Column column = Column.editor().name("c").type(declaredType).create();
+        return converter.converter(column, null).convert(data);
+    }
+
+    @Test
+    void adaptsValuesToEachAffinitysType() {
+        assertThat(convert("BIGINT", 42)).isEqualTo(42L);
+        assertThat(convert("DOUBLE", 1)).isEqualTo(1.0d);
+        assertThat(convert("DECIMAL", 2)).isEqualTo(2.0d);
+        assertThat(convert("VARCHAR", 7)).isEqualTo("7");
+        assertThat(convert("BLOB", new byte[]{ 1, 2 })).isEqualTo(new byte[]{ 1, 2 });
+    }
+
+    @Test
+    void passesNullThrough() {
+        assertThat(convert("BIGINT", null)).isNull();
+        assertThat(convert("DOUBLE", null)).isNull();
+        assertThat(convert("VARCHAR", null)).isNull();
+        assertThat(convert("BLOB", null)).isNull();
+    }
 }
