@@ -107,7 +107,7 @@ public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
 
     /** Tables that are always excluded from monitoring (SQLite internals and the CDC log itself). */
     private static final TableFilter SYSTEM_TABLES_FILTER = TableFilter.fromPredicate(t -> t.table().startsWith("sqlite_")
-            || t.table().equals("_debezium_cdc_log"));
+            || t.table().equals(CdcLog.TABLE_NAME));
 
     /** Maps a {@code TableId} to its string form for include/exclude list matching. */
     private static final TableIdToStringMapper TABLE_ID_MAPPER = TableId::table;
