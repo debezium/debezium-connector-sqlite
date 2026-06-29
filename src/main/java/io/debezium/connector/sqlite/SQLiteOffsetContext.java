@@ -6,10 +6,12 @@
 package io.debezium.connector.sqlite;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.kafka.connect.data.Schema;
 
+import io.debezium.connector.AbstractSourceInfo;
 import io.debezium.pipeline.CommonOffsetContext;
 import io.debezium.pipeline.txmetadata.TransactionContext;
 import io.debezium.spi.schema.DataCollectionId;
@@ -54,7 +56,13 @@ public class SQLiteOffsetContext extends CommonOffsetContext<SQLiteSourceInfo> {
 
     @Override
     public Map<String, ?> getOffset() {
-        return Map.of(CHANGE_ID_KEY, changeId);
+        Map<String, Object> offset = new HashMap<>();
+        if (getSnapshot().isPresent()) {
+            offset.put(AbstractSourceInfo.SNAPSHOT_KEY, getSnapshot().get().toString());
+            offset.put(SNAPSHOT_COMPLETED_KEY, snapshotCompleted);
+        }
+        offset.put(CHANGE_ID_KEY, changeId);
+        return offset;
     }
 
     @Override
