@@ -96,6 +96,16 @@ public class SQLiteConnection extends JdbcConnection {
     }
 
     /**
+     * Returns the largest {@code change_id} in {@code _debezium_cdc_log}, the snapshot high-water
+     * mark streaming resumes from. {@code COALESCE} yields 0 for an empty log, since {@code MAX} over
+     * no rows is {@code NULL}.
+     */
+    public long readMaxChangeId() throws SQLException {
+        String sql = String.format("SELECT COALESCE(MAX(%s), 0) FROM %s", CdcLog.CHANGE_ID, CdcLog.TABLE_NAME);
+        return queryAndMap(sql, rs -> rs.next() ? rs.getLong(1) : 0L);
+    }
+
+    /**
      * Resets a column's JDBC type from its declared type using SQLite's affinity rules, replacing the
      * type the JDBC driver reports. The driver's type ignores affinity: it returns a {@code BLOB}
      * column and a column with no declared type as {@code VARCHAR} and a {@code BOOLEAN} as

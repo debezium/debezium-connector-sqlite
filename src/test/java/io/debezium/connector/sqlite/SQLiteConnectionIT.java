@@ -80,6 +80,30 @@ class SQLiteConnectionIT {
         assertThat(cdcLogTableExists()).isTrue();
     }
 
+    @Test
+    void readMaxChangeIdReturnsZeroForEmptyLog() throws SQLException {
+        connection.createCdcLogTable();
+
+        assertThat(connection.readMaxChangeId()).isZero();
+    }
+
+    @Test
+    void readMaxChangeIdReturnsLargestChangeId() throws SQLException {
+        connection.createCdcLogTable();
+        insertCdcRow(5);
+        insertCdcRow(9);
+        insertCdcRow(7);
+
+        assertThat(connection.readMaxChangeId()).isEqualTo(9L);
+    }
+
+    private void insertCdcRow(long changeId) throws SQLException {
+        connection.execute(String.format(
+                "INSERT INTO %s (%s, %s, %s, %s) VALUES (%d, 'users', 'c', 0)",
+                CdcLog.TABLE_NAME, CdcLog.CHANGE_ID, CdcLog.TABLE_NAME_COLUMN,
+                CdcLog.OPERATION, CdcLog.COMMITTED_AT, changeId));
+    }
+
     private String journalMode() throws SQLException {
         return connection.queryAndMap("PRAGMA journal_mode", rs -> rs.next() ? rs.getString(1) : null);
     }
