@@ -43,11 +43,27 @@ public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
             }
         },
 
+        /** Snapshot existing data on every start, even when an offset is stored. */
+        ALWAYS("always") {
+            @Override
+            public boolean shouldSnapshotData(boolean offsetExists, boolean snapshotInProgress) {
+                return true;
+            }
+        },
+
         /** Never snapshot data; start streaming from the current CDC log position. */
         NO_DATA("no_data") {
             @Override
             public boolean shouldSnapshotData(boolean offsetExists, boolean snapshotInProgress) {
                 return false;
+            }
+        },
+
+        /** Snapshot existing data once, then stop without streaming. */
+        INITIAL_ONLY("initial_only") {
+            @Override
+            public boolean shouldSnapshotData(boolean offsetExists, boolean snapshotInProgress) {
+                return !offsetExists || snapshotInProgress;
             }
         };
 
