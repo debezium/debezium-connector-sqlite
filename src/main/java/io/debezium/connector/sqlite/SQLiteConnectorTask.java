@@ -26,6 +26,8 @@ import io.debezium.connector.common.BaseSourceTask;
 import io.debezium.connector.common.CdcSourceTaskContext;
 import io.debezium.connector.common.DebeziumHeaderProducer;
 import io.debezium.document.DocumentReader;
+import io.debezium.jdbc.DefaultMainConnectionProvidingConnectionFactory;
+import io.debezium.jdbc.MainConnectionProvidingConnectionFactory;
 import io.debezium.pipeline.ChangeEventSourceCoordinator;
 import io.debezium.pipeline.DataChangeEvent;
 import io.debezium.pipeline.ErrorHandler;
@@ -39,6 +41,7 @@ import io.debezium.schema.SchemaFactory;
 import io.debezium.schema.SchemaNameAdjuster;
 import io.debezium.snapshot.SnapshotterService;
 import io.debezium.spi.topic.TopicNamingStrategy;
+import io.debezium.util.Clock;
 
 /**
  * The Kafka Connect source task for the SQLite connector.
@@ -85,8 +88,12 @@ public class SQLiteConnectorTask extends BaseSourceTask<SQLitePartition, SQLiteO
         // Service providers must be registered before any service is looked up below.
         registerServiceProviders(connectorConfig.getServiceRegistry());
 
-        // Open the database and run the startup prerequisites before wiring the pipeline.
-        connection = new SQLiteConnection(databaseFilePath);
+        // Open the database and run the startup prerequisites before wiring the pipeline. The factory
+        // provides the main connection the snapshot source reads from, so the snapshot shares this
+        // already-prepared connection.
+        final MainConnectionProvidingConnectionFactory<SQLiteConnection> connectionFactory = new DefaultMainConnectionProvidingConnectionFactory<>(
+                () -> new SQLiteConnection(databaseFilePath));
+        connection = connectionFactory.mainConnection();
         try {
             connection.connect();
             connection.enforceWalMode();
@@ -153,12 +160,14 @@ public class SQLiteConnectorTask extends BaseSourceTask<SQLitePartition, SQLiteO
                 getNotificationChannels(),
                 connectorConfig, SchemaFactory.get(), dispatcher::enqueueNotification);
 
+        final Clock clock = Clock.system();
+
         final ChangeEventSourceCoordinator<SQLitePartition, SQLiteOffsetContext> coordinator = new ChangeEventSourceCoordinator<>(
                 previousOffsets,
                 errorHandler,
                 SQLiteSourceConnector.class,
                 connectorConfig,
-                new SQLiteChangeEventSourceFactory(connectorConfig, snapshotterService),
+                new SQLiteChangeEventSourceFactory(connectorConfig, snapshotterService, connectionFactory, schema, dispatcher, clock),
                 new DefaultChangeEventSourceMetricsFactory<>(),
                 dispatcher,
                 schema,
