@@ -7,7 +7,9 @@ package io.debezium.connector.sqlite;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.sql.SQLException;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.source.SourceRecord;
@@ -132,6 +134,43 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
                 .map(record -> ((Struct) record.value()).getStruct(Envelope.FieldName.SOURCE).getString("snapshot"))
                 .filter("last"::equals).count();
         assertThat(markedLast).isEqualTo(1L);
+    }
+
+    @Test
+    public void shouldFixTheResumePointAtTheCdcLogHighWaterMark() throws Exception {
+        database.connection().execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)");
+        database.connection().execute(
+                "INSERT INTO t (id, name) VALUES (1, 'a')",
+                "INSERT INTO t (id, name) VALUES (2, 'b')");
+        // Changes already logged before the connector starts. The snapshot captures the current rows, so
+        // streaming must resume past these rather than replay them. The largest change_id is 9.
+        insertCdcLogRow(5);
+        insertCdcLogRow(9);
+        insertCdcLogRow(7);
+
+        Configuration config = Configuration.create()
+                .with(SQLiteConnectorConfig.DATABASE_FILE, database.databaseFile().toString())
+                .with(CommonConnectorConfig.TOPIC_PREFIX, TOPIC_PREFIX)
+                .with(SQLiteConnectorConfig.SNAPSHOT_MODE, "initial")
+                .build();
+
+        start(SQLiteSourceConnector.class, config);
+        assertConnectorIsRunning();
+
+        SourceRecords records = consumeRecordsByTopic(2, false);
+        List<SourceRecord> rows = records.recordsForTopic(TOPIC_PREFIX + ".t");
+        assertThat(rows).hasSize(2);
+
+        // The offset stored with the snapshot records is the high-water mark, so streaming resumes past it.
+        Map<String, ?> offset = rows.get(rows.size() - 1).sourceOffset();
+        assertThat(((Number) offset.get(SQLiteOffsetContext.CHANGE_ID_KEY)).longValue()).isEqualTo(9L);
+    }
+
+    private void insertCdcLogRow(long changeId) throws SQLException {
+        database.connection().execute(String.format(
+                "INSERT INTO %s (%s, %s, %s, %s) VALUES (%d, 't', '%s', 0)",
+                CdcLog.TABLE_NAME, CdcLog.CHANGE_ID, CdcLog.TABLE_NAME_COLUMN, CdcLog.OPERATION,
+                CdcLog.COMMITTED_AT, changeId, CdcLog.OPERATION_CREATE));
     }
 
     private static Struct after(SourceRecord record) {
