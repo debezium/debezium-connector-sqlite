@@ -13,36 +13,74 @@ import io.debezium.relational.ValueConverter;
 import io.debezium.relational.ValueConverterProvider;
 
 /**
- * Maps SQLite column types to Kafka Connect schemas and converts column values.
+ * Maps SQLite columns to Kafka Connect schemas and converts column values, switching on the
+ * column's {@link SQLiteTypeAffinity}.
  *
- * <p>Stub implementation for Phase 0. Full type mapping (INTEGER, REAL, TEXT, BLOB, NUMERIC)
- * is implemented in Phase 1.
+ * <p>{@link #schemaBuilder(Column)} returns the Connect schema for a column's affinity, and
+ * {@link #converter(Column, Field)} returns the matching per-affinity function that adapts a value
+ * to that schema's Java type. These functions adapt a value whose storage class already agrees with
+ * the column's affinity. Reconciling a value whose storage class differs from the affinity, which
+ * SQLite's dynamic typing allows, is done where rows are read.
  */
 class SQLiteValueConverter implements ValueConverterProvider {
 
     /**
-     * Returns a {@link SchemaBuilder} for the given SQLite column type.
+     * Returns the Kafka Connect {@link SchemaBuilder} for a column, chosen by its SQLite affinity:
+     * INTEGER to {@code INT64}, REAL and NUMERIC to {@code FLOAT64}, TEXT to {@code STRING}, and
+     * BLOB to {@code BYTES}. NUMERIC maps to {@code FLOAT64} because it matches SQLite's own numeric
+     * storage and keeps the schema simple. The builder is returned without an optional flag, since
+     * {@code TableSchemaBuilder} sets nullability from the column.
      *
      * @param column the column definition
-     * @return the schema builder, or {@code null} if the type is not yet mapped
+     * @return the schema builder for the column's affinity
      */
     @Override
     public SchemaBuilder schemaBuilder(Column column) {
-        // TODO: map SQLite affinities (INTEGER, REAL, TEXT, BLOB, NUMERIC) in Phase 1.
-        return null;
+        return switch (SQLiteTypeAffinity.of(column.typeName())) {
+            case INTEGER -> SchemaBuilder.int64();
+            case REAL, NUMERIC -> SchemaBuilder.float64();
+            case TEXT -> SchemaBuilder.string();
+            case BLOB -> SchemaBuilder.bytes();
+        };
     }
 
     /**
-     * Returns a converter that transforms a raw SQLite value into the Connect-typed value
-     * described by the schema returned from {@link #schemaBuilder(Column)}.
+     * Returns the value converter for a column, chosen by its SQLite affinity. Each converter adapts
+     * a value to the Java type the column's Connect schema expects: INTEGER to {@code Long}, REAL and
+     * NUMERIC to {@code Double}, TEXT to {@code String}, and BLOB to {@code byte[]}. A null value is
+     * passed through as null.
      *
      * @param column the column definition
      * @param field  the Connect field definition
-     * @return the value converter
+     * @return the value converter for the column's affinity
      */
     @Override
     public ValueConverter converter(Column column, Field field) {
-        // TODO: implement type-specific converters in Phase 1.
-        return x -> x;
+        return switch (SQLiteTypeAffinity.of(column.typeName())) {
+            case INTEGER -> SQLiteValueConverter::toInt64;
+            case REAL, NUMERIC -> SQLiteValueConverter::toFloat64;
+            case TEXT -> SQLiteValueConverter::toStringValue;
+            case BLOB -> SQLiteValueConverter::toBytes;
+        };
+    }
+
+    /** Adapts a numeric value to the {@code Long} an INT64 schema expects, leaving null and other types untouched. */
+    private static Object toInt64(Object data) {
+        return data instanceof Number number ? number.longValue() : data;
+    }
+
+    /** Adapts a numeric value to the {@code Double} a FLOAT64 schema expects, leaving null and other types untouched. */
+    private static Object toFloat64(Object data) {
+        return data instanceof Number number ? number.doubleValue() : data;
+    }
+
+    /** Renders a value as the {@code String} a STRING schema expects, passing null through. */
+    private static Object toStringValue(Object data) {
+        return data == null ? null : data.toString();
+    }
+
+    /** Passes a value through for a BYTES schema; BLOB-affinity values are already {@code byte[]}. */
+    private static Object toBytes(Object data) {
+        return data;
     }
 }

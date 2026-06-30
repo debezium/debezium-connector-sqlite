@@ -5,6 +5,7 @@
  */
 package io.debezium.connector.sqlite;
 
+import java.sql.SQLException;
 import java.util.List;
 
 import io.debezium.connector.common.CdcSourceTaskContext;
@@ -43,5 +44,21 @@ public class SQLiteDatabaseSchema extends RelationalDatabaseSchema {
                 false,
                 taskContext.getConfig().getKeyMapper(),
                 taskContext);
+    }
+
+    /**
+     * Reads the current schema from the database and registers a Kafka Connect schema for every
+     * monitored table. It delegates to the inherited {@code readSchema}, which enumerates the user
+     * tables, reads their columns and primary keys through the SQLite JDBC driver, and applies the
+     * always-exclude and the table include/exclude filter. The connection's {@code overrideColumn}
+     * gives each column its affinity-correct JDBC type. Each surviving table is then built and
+     * registered, with the column include/exclude filter applied during the build.
+     *
+     * @param connection an open connection to the database file
+     * @throws SQLException if the schema cannot be read
+     */
+    public void refresh(SQLiteConnection connection) throws SQLException {
+        connection.readSchema(tables(), null, null, getTableFilter(), null, true);
+        tableIds().forEach(this::refreshSchema);
     }
 }
