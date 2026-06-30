@@ -10,9 +10,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.source.SourceRecord;
+import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,6 +23,8 @@ import io.debezium.config.CommonConnectorConfig;
 import io.debezium.config.Configuration;
 import io.debezium.data.Envelope;
 import io.debezium.embedded.async.AbstractAsyncEngineConnectorTest;
+import io.debezium.junit.logging.LogInterceptor;
+import io.debezium.pipeline.ChangeEventSourceCoordinator;
 
 /**
  * Integration test for the initial snapshot. Booting with {@code snapshot.mode=initial} must emit one
@@ -164,6 +168,76 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
         // The offset stored with the snapshot records is the high-water mark, so streaming resumes past it.
         Map<String, ?> offset = rows.get(rows.size() - 1).sourceOffset();
         assertThat(((Number) offset.get(SQLiteOffsetContext.CHANGE_ID_KEY)).longValue()).isEqualTo(9L);
+    }
+
+    @Test
+    public void shouldSnapshotOnceThenStopForInitialOnly() throws Exception {
+        LogInterceptor coordinatorLog = new LogInterceptor(ChangeEventSourceCoordinator.class);
+
+        database.connection().execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)");
+        database.connection().execute(
+                "INSERT INTO t (id, name) VALUES (1, 'a')",
+                "INSERT INTO t (id, name) VALUES (2, 'b')");
+
+        Configuration config = Configuration.create()
+                .with(SQLiteConnectorConfig.DATABASE_FILE, database.databaseFile().toString())
+                .with(CommonConnectorConfig.TOPIC_PREFIX, TOPIC_PREFIX)
+                .with(SQLiteConnectorConfig.SNAPSHOT_MODE, "initial_only")
+                .build();
+
+        start(SQLiteSourceConnector.class, config);
+        assertConnectorIsRunning();
+
+        assertThat(consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".t")).hasSize(2);
+
+        // initial_only takes the snapshot and then does not transition to streaming.
+        Awaitility.await().atMost(10, TimeUnit.SECONDS)
+                .until(() -> coordinatorLog.containsMessage("Streaming is disabled for snapshot mode initial_only"));
+    }
+
+    @Test
+    public void shouldSkipTheDataScanForNoData() throws Exception {
+        database.connection().execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)");
+        database.connection().execute(
+                "INSERT INTO t (id, name) VALUES (1, 'a')",
+                "INSERT INTO t (id, name) VALUES (2, 'b')");
+
+        Configuration config = Configuration.create()
+                .with(SQLiteConnectorConfig.DATABASE_FILE, database.databaseFile().toString())
+                .with(CommonConnectorConfig.TOPIC_PREFIX, TOPIC_PREFIX)
+                .with(SQLiteConnectorConfig.SNAPSHOT_MODE, "no_data")
+                .build();
+
+        start(SQLiteSourceConnector.class, config);
+        assertConnectorIsRunning();
+
+        // no_data skips the data scan, so the seeded rows are not emitted as read records.
+        waitForAvailableRecords(1, TimeUnit.SECONDS);
+        assertNoRecordsToConsume();
+    }
+
+    @Test
+    public void shouldSnapshotAgainOnRestartForAlways() throws Exception {
+        database.connection().execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)");
+        database.connection().execute(
+                "INSERT INTO t (id, name) VALUES (1, 'a')",
+                "INSERT INTO t (id, name) VALUES (2, 'b')");
+
+        Configuration config = Configuration.create()
+                .with(SQLiteConnectorConfig.DATABASE_FILE, database.databaseFile().toString())
+                .with(CommonConnectorConfig.TOPIC_PREFIX, TOPIC_PREFIX)
+                .with(SQLiteConnectorConfig.SNAPSHOT_MODE, "always")
+                .build();
+
+        start(SQLiteSourceConnector.class, config);
+        assertConnectorIsRunning();
+        assertThat(consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".t")).hasSize(2);
+        stopConnector();
+
+        // A completed-snapshot offset is now stored, but always snapshots again on the next start.
+        start(SQLiteSourceConnector.class, config);
+        assertConnectorIsRunning();
+        assertThat(consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".t")).hasSize(2);
     }
 
     private void insertCdcLogRow(long changeId) throws SQLException {

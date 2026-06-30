@@ -70,7 +70,9 @@ class SQLiteConnectorConfigTest {
     @Test
     void snapshotModeParseRoundTrips() {
         assertThat(SnapshotMode.parse("initial")).isEqualTo(SnapshotMode.INITIAL);
+        assertThat(SnapshotMode.parse("always")).isEqualTo(SnapshotMode.ALWAYS);
         assertThat(SnapshotMode.parse("no_data")).isEqualTo(SnapshotMode.NO_DATA);
+        assertThat(SnapshotMode.parse("initial_only")).isEqualTo(SnapshotMode.INITIAL_ONLY);
         assertThat(SnapshotMode.parse("INITIAL")).isEqualTo(SnapshotMode.INITIAL);
         assertThatThrownBy(() -> SnapshotMode.parse("bogus"))
                 .isInstanceOf(IllegalArgumentException.class);
