@@ -26,8 +26,26 @@ import io.debezium.relational.ValueConverterProvider;
  * throw. The framework's {@code event.converting.failure.handling.mode} then decides the outcome:
  * {@code fail} stops the connector, {@code warn} logs the column and leaves the field null, and
  * {@code skip} leaves the field null quietly.
+ *
+ * <p>Leaving the field null works for a nullable column, and for a non-nullable column that has a
+ * default the schema default takes over, but a non-nullable column with no default has no null to
+ * fall back on and the record then fails downstream. When {@code nonnull.affinity.mismatch.fallback} is
+ * enabled and the failure mode is {@code warn} or {@code skip}, the converter instead substitutes a
+ * type placeholder for that case (0 for INTEGER, 0.0 for REAL and NUMERIC, an empty string for TEXT,
+ * and empty bytes for BLOB), so such a value keeps flowing rather than failing. Under {@code fail} the
+ * placeholder does not apply and the mismatch stops the connector. The connector resolves this gating
+ * and passes the result to the constructor.
  */
 class SQLiteValueConverter implements ValueConverterProvider {
+
+    private static final byte[] EMPTY_BYTES = new byte[0];
+
+    /** Whether to substitute a type placeholder for an unrepresentable value in a non-nullable, no-default column. */
+    private final boolean substituteNonNullFallback;
+
+    SQLiteValueConverter(boolean substituteNonNullFallback) {
+        this.substituteNonNullFallback = substituteNonNullFallback;
+    }
 
     /**
      * Returns the Kafka Connect {@link SchemaBuilder} for a column, chosen by its SQLite affinity:
@@ -54,8 +72,10 @@ class SQLiteValueConverter implements ValueConverterProvider {
      * a value to the Java type the column's Connect schema expects: INTEGER to {@code Long}, REAL and
      * NUMERIC to {@code Double}, TEXT to {@code String}, and BLOB to {@code byte[]}. A null value is
      * passed through as null. A value whose storage class cannot be represented in that type makes the
-     * converter throw a {@link DebeziumException}, which the framework's configured event conversion
-     * failure handling mode turns into a stop, a warning, or a skipped field.
+     * converter throw a {@link DebeziumException}, unless the column is non-nullable with no default
+     * and placeholder substitution is enabled, in which case a type placeholder is substituted. The
+     * throw is turned into a stop, a warning, or a skipped field by the framework's configured event
+     * conversion failure handling mode.
      *
      * @param column the column definition
      * @param field  the Connect field definition
@@ -63,53 +83,56 @@ class SQLiteValueConverter implements ValueConverterProvider {
      */
     @Override
     public ValueConverter converter(Column column, Field field) {
-        return switch (SQLiteTypeAffinity.of(column.typeName())) {
-            case INTEGER -> SQLiteValueConverter::toInt64;
-            case REAL, NUMERIC -> SQLiteValueConverter::toFloat64;
-            case TEXT -> SQLiteValueConverter::toStringValue;
-            case BLOB -> SQLiteValueConverter::toBytes;
+        SQLiteTypeAffinity affinity = SQLiteTypeAffinity.of(column.typeName());
+        return data -> convert(affinity, column, field, data);
+    }
+
+    /**
+     * Adapts a value to the Java type the column's schema expects, passing null through. A value whose
+     * storage class does not fit the affinity yields a placeholder when the column is non-nullable with
+     * no default and the fallback is enabled, and otherwise throws.
+     */
+    private Object convert(SQLiteTypeAffinity affinity, Column column, Field field, Object data) {
+        if (data == null) {
+            return null;
+        }
+        Object converted = tryConvert(affinity, data);
+        if (converted != null) {
+            return converted;
+        }
+        if (substituteNonNullFallback && isRequiredWithoutDefault(column, field)) {
+            return fallbackFor(affinity);
+        }
+        throw unrepresentable(data, affinity);
+    }
+
+    /**
+     * Converts a non-null value to the affinity's Java type, or returns null when the value's storage
+     * class cannot be represented in that type. A successful conversion is never null, so a null return
+     * unambiguously marks an unrepresentable value.
+     */
+    private static Object tryConvert(SQLiteTypeAffinity affinity, Object data) {
+        return switch (affinity) {
+            case INTEGER -> data instanceof Number number ? number.longValue() : null;
+            case REAL, NUMERIC -> data instanceof Number number ? number.doubleValue() : null;
+            case TEXT -> data instanceof byte[] ? null : data.toString();
+            case BLOB -> data instanceof byte[] ? data : null;
         };
     }
 
-    /** Adapts a numeric value to the {@code Long} an INT64 schema expects, passing null through and throwing for a non-numeric value. */
-    private static Object toInt64(Object data) {
-        if (data == null) {
-            return null;
-        }
-        if (data instanceof Number number) {
-            return number.longValue();
-        }
-        throw unrepresentable(data, "INT64");
+    /** The type placeholder for an affinity: 0 for INTEGER, 0.0 for REAL and NUMERIC, an empty string for TEXT, and empty bytes for BLOB. */
+    private static Object fallbackFor(SQLiteTypeAffinity affinity) {
+        return switch (affinity) {
+            case INTEGER -> 0L;
+            case REAL, NUMERIC -> 0.0d;
+            case TEXT -> "";
+            case BLOB -> EMPTY_BYTES;
+        };
     }
 
-    /** Adapts a numeric value to the {@code Double} a FLOAT64 schema expects, passing null through and throwing for a non-numeric value. */
-    private static Object toFloat64(Object data) {
-        if (data == null) {
-            return null;
-        }
-        if (data instanceof Number number) {
-            return number.doubleValue();
-        }
-        throw unrepresentable(data, "FLOAT64");
-    }
-
-    /** Renders a value as the {@code String} a STRING schema expects, passing null through and throwing for a blob, which does not render as text. */
-    private static Object toStringValue(Object data) {
-        if (data == null) {
-            return null;
-        }
-        if (data instanceof byte[]) {
-            throw unrepresentable(data, "STRING");
-        }
-        return data.toString();
-    }
-
-    /** Passes a {@code byte[]} through for a BYTES schema, passing null through and throwing for any other type. */
-    private static Object toBytes(Object data) {
-        if (data == null || data instanceof byte[]) {
-            return data;
-        }
-        throw unrepresentable(data, "BYTES");
+    /** A column that must hold a value has no null to fall back on when it is non-nullable and carries no default. */
+    private static boolean isRequiredWithoutDefault(Column column, Field field) {
+        return !column.isOptional() && (field == null || field.schema().defaultValue() == null);
     }
 
     /**
@@ -117,8 +140,18 @@ class SQLiteValueConverter implements ValueConverterProvider {
      * schema type. SQLite's dynamic typing allows the mismatch, so the connector defers the outcome to
      * the framework's event conversion failure handling mode rather than deciding here.
      */
-    private static DebeziumException unrepresentable(Object data, String schemaType) {
+    private static DebeziumException unrepresentable(Object data, SQLiteTypeAffinity affinity) {
         return new DebeziumException("A " + data.getClass().getSimpleName() + " value does not match the "
-                + "column's " + schemaType + " schema; its SQLite storage class differs from the column's affinity");
+                + "column's " + schemaTypeName(affinity) + " schema; its SQLite storage class differs from the column's affinity");
+    }
+
+    /** The Connect schema type name for an affinity, used in the mismatch message. */
+    private static String schemaTypeName(SQLiteTypeAffinity affinity) {
+        return switch (affinity) {
+            case INTEGER -> "INT64";
+            case REAL, NUMERIC -> "FLOAT64";
+            case TEXT -> "STRING";
+            case BLOB -> "BYTES";
+        };
     }
 }

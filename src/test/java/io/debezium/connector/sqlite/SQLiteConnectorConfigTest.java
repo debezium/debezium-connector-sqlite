@@ -78,6 +78,31 @@ class SQLiteConnectorConfigTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    private static SQLiteConnectorConfig configWith(Map<String, String> extra) {
+        Map<String, String> props = new java.util.HashMap<>(Map.of(
+                SQLiteConnectorConfig.DATABASE_FILE.name(), "/tmp/test.db",
+                CommonConnectorConfig.TOPIC_PREFIX.name(), "test"));
+        props.putAll(extra);
+        return new SQLiteConnectorConfig(Configuration.from(props));
+    }
+
+    @Test
+    void nonNullPlaceholderIsOffByDefault() {
+        assertThat(configWith(Map.of()).shouldSubstituteNonNullPlaceholder()).isFalse();
+    }
+
+    @Test
+    void nonNullPlaceholderAppliesUnderWarnAndSkipButNotFail() {
+        // The placeholder rescues the warn and skip dead-end; under fail the connector is meant to stop.
+        assertThat(configWith(Map.of("nonnull.affinity.mismatch.fallback", "true")).shouldSubstituteNonNullPlaceholder()).isTrue();
+        assertThat(configWith(Map.of(
+                "nonnull.affinity.mismatch.fallback", "true",
+                "event.converting.failure.handling.mode", "skip")).shouldSubstituteNonNullPlaceholder()).isTrue();
+        assertThat(configWith(Map.of(
+                "nonnull.affinity.mismatch.fallback", "true",
+                "event.converting.failure.handling.mode", "fail")).shouldSubstituteNonNullPlaceholder()).isFalse();
+    }
+
     private static boolean isMonitored(String table) {
         Configuration config = Configuration.from(Map.of(
                 SQLiteConnectorConfig.DATABASE_FILE.name(), "/tmp/test.db",

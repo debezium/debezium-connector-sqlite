@@ -33,7 +33,7 @@ public class SQLiteDatabaseSchema extends RelationalDatabaseSchema {
                 taskContext.getConfig().getTableFilters().dataCollectionFilter(),
                 taskContext.getConfig().getColumnFilter(),
                 new TableSchemaBuilder(
-                        new SQLiteValueConverter(),
+                        new SQLiteValueConverter(taskContext.getConfig().shouldSubstituteNonNullPlaceholder()),
                         null,
                         taskContext.getConfig().schemaNameAdjuster(),
                         new CustomConverterRegistry(List.of()),

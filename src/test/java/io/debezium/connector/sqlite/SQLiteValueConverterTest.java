@@ -20,7 +20,8 @@ import io.debezium.relational.Column;
  */
 public class SQLiteValueConverterTest {
 
-    private final SQLiteValueConverter converter = new SQLiteValueConverter();
+    private final SQLiteValueConverter converter = new SQLiteValueConverter(false);
+    private final SQLiteValueConverter fallbackConverter = new SQLiteValueConverter(true);
 
     private Schema schemaFor(String declaredType) {
         Column column = Column.editor().name("c").type(declaredType).create();
@@ -80,5 +81,27 @@ public class SQLiteValueConverterTest {
         // A number or text in a blob column.
         assertThatThrownBy(() -> convert("BLOB", 5)).isInstanceOf(DebeziumException.class);
         assertThatThrownBy(() -> convert("BLOB", "x")).isInstanceOf(DebeziumException.class);
+    }
+
+    private Object convertRequired(String declaredType, Object data) {
+        Column column = Column.editor().name("c").type(declaredType).optional(false).create();
+        return fallbackConverter.converter(column, null).convert(data);
+    }
+
+    @Test
+    void substitutesAPlaceholderForARequiredColumnWhenFallbackEnabled() {
+        assertThat(convertRequired("BIGINT", "hello")).isEqualTo(0L);
+        assertThat(convertRequired("DOUBLE", "hello")).isEqualTo(0.0d);
+        assertThat(convertRequired("VARCHAR", new byte[]{ 1 })).isEqualTo("");
+        assertThat(convertRequired("BLOB", 5)).isEqualTo(new byte[0]);
+        // A representable value is still converted normally, not replaced by the placeholder.
+        assertThat(convertRequired("BIGINT", 42)).isEqualTo(42L);
+    }
+
+    @Test
+    void stillThrowsForANullableColumnWhenFallbackEnabled() {
+        // The fallback only rescues non-nullable columns; a nullable column keeps throwing so it resolves to null.
+        Column column = Column.editor().name("c").type("BIGINT").optional(true).create();
+        assertThatThrownBy(() -> fallbackConverter.converter(column, null).convert("hello")).isInstanceOf(DebeziumException.class);
     }
 }
