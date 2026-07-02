@@ -141,6 +141,39 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
     }
 
     @Test
+    public void shouldNullTheFieldAndWarnWhenAValueDoesNotMatchAffinity() throws Exception {
+        LogInterceptor conversionLog = new LogInterceptor("io.debezium.relational.TableSchemaBuilder");
+
+        database.connection().execute("CREATE TABLE t (id INTEGER PRIMARY KEY, note TEXT)");
+        // SQLite's dynamic typing lets a blob sit in a TEXT column. A blob does not render as a string,
+        // so the default event.converting.failure.handling.mode (warn) nulls the field and keeps the row.
+        database.connection().execute(
+                "INSERT INTO t (id, note) VALUES (1, x'0102')",
+                "INSERT INTO t (id, note) VALUES (2, 'hello')");
+
+        Configuration config = Configuration.create()
+                .with(SQLiteConnectorConfig.DATABASE_FILE, database.databaseFile().toString())
+                .with(CommonConnectorConfig.TOPIC_PREFIX, TOPIC_PREFIX)
+                .with(SQLiteConnectorConfig.SNAPSHOT_MODE, "initial")
+                .build();
+
+        start(SQLiteSourceConnector.class, config);
+        assertConnectorIsRunning();
+
+        List<SourceRecord> rows = consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".t");
+        assertThat(rows).hasSize(2);
+
+        Struct blobRow = rows.stream().map(SQLiteSnapshotIT::after).filter(after -> after.getInt64("id") == 1L).findFirst().orElseThrow();
+        Struct textRow = rows.stream().map(SQLiteSnapshotIT::after).filter(after -> after.getInt64("id") == 2L).findFirst().orElseThrow();
+
+        // The blob does not fit the TEXT column's STRING schema, so warn mode leaves it null.
+        assertThat(blobRow.getString("note")).isNull();
+        // A well-typed value in the same column is unaffected.
+        assertThat(textRow.getString("note")).isEqualTo("hello");
+        assertThat(conversionLog.containsWarnMessage("Failed to properly convert data value")).isTrue();
+    }
+
+    @Test
     public void shouldFixTheResumePointAtTheCdcLogHighWaterMark() throws Exception {
         database.connection().execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)");
         database.connection().execute(
