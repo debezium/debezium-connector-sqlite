@@ -8,6 +8,7 @@ package io.debezium.connector.sqlite;
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.SchemaBuilder;
 
+import io.debezium.DebeziumException;
 import io.debezium.relational.Column;
 import io.debezium.relational.ValueConverter;
 import io.debezium.relational.ValueConverterProvider;
@@ -18,9 +19,13 @@ import io.debezium.relational.ValueConverterProvider;
  *
  * <p>{@link #schemaBuilder(Column)} returns the Connect schema for a column's affinity, and
  * {@link #converter(Column, Field)} returns the matching per-affinity function that adapts a value
- * to that schema's Java type. These functions adapt a value whose storage class already agrees with
- * the column's affinity. Reconciling a value whose storage class differs from the affinity, which
- * SQLite's dynamic typing allows, is done where rows are read.
+ * to that schema's Java type. A converter adapts a value whose storage class agrees with the
+ * column's affinity. SQLite's dynamic typing lets a value's storage class differ from the affinity,
+ * and a value that cannot be represented in the column's schema (a blob or non-numeric text in a
+ * numeric column, a blob in a text column, or a number or text in a blob column) makes the converter
+ * throw. The framework's {@code event.converting.failure.handling.mode} then decides the outcome:
+ * {@code fail} stops the connector, {@code warn} logs the column and leaves the field null, and
+ * {@code skip} leaves the field null quietly.
  */
 class SQLiteValueConverter implements ValueConverterProvider {
 
@@ -48,7 +53,9 @@ class SQLiteValueConverter implements ValueConverterProvider {
      * Returns the value converter for a column, chosen by its SQLite affinity. Each converter adapts
      * a value to the Java type the column's Connect schema expects: INTEGER to {@code Long}, REAL and
      * NUMERIC to {@code Double}, TEXT to {@code String}, and BLOB to {@code byte[]}. A null value is
-     * passed through as null.
+     * passed through as null. A value whose storage class cannot be represented in that type makes the
+     * converter throw a {@link DebeziumException}, which the framework's configured event conversion
+     * failure handling mode turns into a stop, a warning, or a skipped field.
      *
      * @param column the column definition
      * @param field  the Connect field definition
@@ -64,23 +71,54 @@ class SQLiteValueConverter implements ValueConverterProvider {
         };
     }
 
-    /** Adapts a numeric value to the {@code Long} an INT64 schema expects, leaving null and other types untouched. */
+    /** Adapts a numeric value to the {@code Long} an INT64 schema expects, passing null through and throwing for a non-numeric value. */
     private static Object toInt64(Object data) {
-        return data instanceof Number number ? number.longValue() : data;
+        if (data == null) {
+            return null;
+        }
+        if (data instanceof Number number) {
+            return number.longValue();
+        }
+        throw unrepresentable(data, "INT64");
     }
 
-    /** Adapts a numeric value to the {@code Double} a FLOAT64 schema expects, leaving null and other types untouched. */
+    /** Adapts a numeric value to the {@code Double} a FLOAT64 schema expects, passing null through and throwing for a non-numeric value. */
     private static Object toFloat64(Object data) {
-        return data instanceof Number number ? number.doubleValue() : data;
+        if (data == null) {
+            return null;
+        }
+        if (data instanceof Number number) {
+            return number.doubleValue();
+        }
+        throw unrepresentable(data, "FLOAT64");
     }
 
-    /** Renders a value as the {@code String} a STRING schema expects, passing null through. */
+    /** Renders a value as the {@code String} a STRING schema expects, passing null through and throwing for a blob, which does not render as text. */
     private static Object toStringValue(Object data) {
-        return data == null ? null : data.toString();
+        if (data == null) {
+            return null;
+        }
+        if (data instanceof byte[]) {
+            throw unrepresentable(data, "STRING");
+        }
+        return data.toString();
     }
 
-    /** Passes a value through for a BYTES schema; BLOB-affinity values are already {@code byte[]}. */
+    /** Passes a {@code byte[]} through for a BYTES schema, passing null through and throwing for any other type. */
     private static Object toBytes(Object data) {
-        return data;
+        if (data == null || data instanceof byte[]) {
+            return data;
+        }
+        throw unrepresentable(data, "BYTES");
+    }
+
+    /**
+     * Builds the exception thrown when a value's storage class cannot be represented in the column's
+     * schema type. SQLite's dynamic typing allows the mismatch, so the connector defers the outcome to
+     * the framework's event conversion failure handling mode rather than deciding here.
+     */
+    private static DebeziumException unrepresentable(Object data, String schemaType) {
+        return new DebeziumException("A " + data.getClass().getSimpleName() + " value does not match the "
+                + "column's " + schemaType + " schema; its SQLite storage class differs from the column's affinity");
     }
 }

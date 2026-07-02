@@ -6,10 +6,12 @@
 package io.debezium.connector.sqlite;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.apache.kafka.connect.data.Schema;
 import org.junit.jupiter.api.Test;
 
+import io.debezium.DebeziumException;
 import io.debezium.relational.Column;
 
 /**
@@ -65,5 +67,18 @@ public class SQLiteValueConverterTest {
         assertThat(convert("DOUBLE", null)).isNull();
         assertThat(convert("VARCHAR", null)).isNull();
         assertThat(convert("BLOB", null)).isNull();
+    }
+
+    @Test
+    void throwsWhenStorageClassCannotBeRepresented() {
+        // A blob or non-numeric text physically stored in a numeric column.
+        assertThatThrownBy(() -> convert("BIGINT", "hello")).isInstanceOf(DebeziumException.class);
+        assertThatThrownBy(() -> convert("DOUBLE", "hello")).isInstanceOf(DebeziumException.class);
+        assertThatThrownBy(() -> convert("BIGINT", new byte[]{ 1 })).isInstanceOf(DebeziumException.class);
+        // A blob in a text column, which would otherwise render as a garbage String.
+        assertThatThrownBy(() -> convert("VARCHAR", new byte[]{ 1 })).isInstanceOf(DebeziumException.class);
+        // A number or text in a blob column.
+        assertThatThrownBy(() -> convert("BLOB", 5)).isInstanceOf(DebeziumException.class);
+        assertThatThrownBy(() -> convert("BLOB", "x")).isInstanceOf(DebeziumException.class);
     }
 }
