@@ -174,6 +174,38 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
     }
 
     @Test
+    public void shouldSubstituteAPlaceholderForANonNullMismatchWhenFallbackEnabled() throws Exception {
+        database.connection().execute("CREATE TABLE t (id INTEGER PRIMARY KEY, qty BIGINT NOT NULL)");
+        // 'hello' is not numeric, so SQLite keeps it as text in the BIGINT (INTEGER-affinity) column. The
+        // column is non-nullable with no default, so with the fallback enabled the value becomes the 0
+        // placeholder rather than failing.
+        database.connection().execute(
+                "INSERT INTO t (id, qty) VALUES (1, 'hello')",
+                "INSERT INTO t (id, qty) VALUES (2, 5)");
+
+        Configuration config = Configuration.create()
+                .with(SQLiteConnectorConfig.DATABASE_FILE, database.databaseFile().toString())
+                .with(CommonConnectorConfig.TOPIC_PREFIX, TOPIC_PREFIX)
+                .with(SQLiteConnectorConfig.SNAPSHOT_MODE, "initial")
+                .with(SQLiteConnectorConfig.NONNULL_AFFINITY_MISMATCH_FALLBACK, true)
+                .build();
+
+        start(SQLiteSourceConnector.class, config);
+        assertConnectorIsRunning();
+
+        List<SourceRecord> rows = consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".t");
+        assertThat(rows).hasSize(2);
+
+        Struct mismatch = rows.stream().map(SQLiteSnapshotIT::after).filter(after -> after.getInt64("id") == 1L).findFirst().orElseThrow();
+        Struct good = rows.stream().map(SQLiteSnapshotIT::after).filter(after -> after.getInt64("id") == 2L).findFirst().orElseThrow();
+
+        // The non-numeric value in the non-nullable column becomes the integer placeholder.
+        assertThat(mismatch.getInt64("qty")).isEqualTo(0L);
+        // A well-typed value in the same column is unaffected.
+        assertThat(good.getInt64("qty")).isEqualTo(5L);
+    }
+
+    @Test
     public void shouldFixTheResumePointAtTheCdcLogHighWaterMark() throws Exception {
         database.connection().execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)");
         database.connection().execute(
