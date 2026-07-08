@@ -80,11 +80,42 @@ public class TriggerGeneratorTest {
                 .contains("json_object('" + CdcLog.BLOB_HEX_MARKER + "', hex(NEW.\"id\"))");
     }
 
+    @Test
+    void narrowTableDoesNotUseJsonSet() {
+        // A small column list fits one json_object call, so no merge is needed.
+        String insert = TriggerGenerator.createTriggers(TABLE, sequentialColumns(40)).get(0);
+        assertThat(insert).doesNotContain("json_set(");
+    }
+
+    @Test
+    void wideTableChunksWithJsonSetAndQuotesAwkwardNames() {
+        List<String> columns = new ArrayList<>(sequentialColumns(60));
+        // An awkward name, in a later chunk so it is serialized through the json_set path.
+        columns.set(55, "w\"x");
+        String insert = TriggerGenerator.createTriggers(TABLE, columns).get(0);
+
+        // Past the chunk limit the row is merged with json_set rather than one json_object.
+        assertThat(insert).contains("json_set(");
+        // The name is escaped for the json path and the surrounding SQL literal, and its value
+        // reference doubles the embedded quote.
+        assertThat(insert).contains("'$.\"w\\\"x\"'")
+                .contains("NEW.\"w\"\"x\"");
+    }
+
     /** The blob-safe value expression the generator emits for one column, per row alias. */
     private static String blobSafe(String alias, String column) {
         String ref = alias + ".\"" + column + "\"";
         return "CASE WHEN typeof(" + ref + ")='blob' THEN json_object('" + CdcLog.BLOB_HEX_MARKER
                 + "', hex(" + ref + ")) ELSE " + ref + " END";
+    }
+
+    /** A list of {@code count} column names {@code c0..c(count-1)}. */
+    private static List<String> sequentialColumns(int count) {
+        List<String> columns = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            columns.add("c" + i);
+        }
+        return columns;
     }
 
     /** Names of every trigger SQLite has stored, read from {@code sqlite_master}. */
