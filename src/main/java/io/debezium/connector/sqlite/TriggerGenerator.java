@@ -9,16 +9,15 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * Builds the SQLite triggers that stand in for a change-event writer in tests.
+ * Builds the SQLite triggers that capture changes into {@link CdcLog#TABLE_NAME _debezium_cdc_log}.
  *
  * <p>Given a source table and its columns, {@link #createTriggers(String, List)} returns the
  * {@code AFTER INSERT}, {@code AFTER UPDATE}, and {@code AFTER DELETE} trigger statements that write
- * one correctly shaped row into {@link CdcLog#TABLE_NAME _debezium_cdc_log} for every change to the
- * table. The row data is captured with SQLite's {@code json_object()} over the {@code NEW} and
- * {@code OLD} row aliases, so an insert records the new row, a delete records the old row, and an
- * update records both.
+ * one correctly shaped row into {@code _debezium_cdc_log} for every change to the table. The row data
+ * is captured with SQLite's {@code json_object()} over the {@code NEW} and {@code OLD} row aliases, so
+ * an insert records the new row, a delete records the old row, and an update records both.
  *
- * <p>This class only builds the SQL. Running it against a database is the caller's job.
+ * <p>This class only builds the SQL. Installing the triggers against a database is the caller's job.
  */
 public final class TriggerGenerator {
 
