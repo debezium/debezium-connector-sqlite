@@ -75,11 +75,23 @@ public final class TriggerGenerator {
                 COMMITTED_AT_EXPR);
     }
 
-    /** Builds a {@code json_object('col', ALIAS."col", ...)} expression over the row alias. */
+    /** Builds a {@code json_object('col', <value>, ...)} expression over the row alias. */
     private static String jsonObject(String rowAlias, List<String> columns) {
         String pairs = columns.stream()
-                .map(column -> "'" + column + "', " + rowAlias + ".\"" + column + "\"")
+                .map(column -> "'" + column + "', " + columnValue(rowAlias, column))
                 .collect(Collectors.joining(", "));
         return "json_object(" + pairs + ")";
+    }
+
+    /**
+     * The captured value expression for one column. A blob is hex-encoded into a tagged nested object
+     * so {@code json_object} can hold it, which it otherwise cannot; every other storage class stays a
+     * bare value. The {@code typeof} test runs per row, so a blob is caught in any column whatever its
+     * declared affinity.
+     */
+    private static String columnValue(String rowAlias, String column) {
+        String ref = rowAlias + ".\"" + column + "\"";
+        return "CASE WHEN typeof(" + ref + ")='blob' THEN json_object('" + CdcLog.BLOB_HEX_MARKER
+                + "', hex(" + ref + ")) ELSE " + ref + " END";
     }
 }
