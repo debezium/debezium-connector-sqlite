@@ -6,10 +6,12 @@
 package io.debezium.connector.sqlite;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.kafka.connect.data.Schema;
 
+import io.debezium.connector.AbstractSourceInfo;
 import io.debezium.pipeline.CommonOffsetContext;
 import io.debezium.pipeline.txmetadata.TransactionContext;
 import io.debezium.spi.schema.DataCollectionId;
@@ -31,6 +33,17 @@ public class SQLiteOffsetContext extends CommonOffsetContext<SQLiteSourceInfo> {
         super(sourceInfo);
     }
 
+    /**
+     * Creates the offset context for a connector that has never run, positioned before the first
+     * {@code change_id}.
+     *
+     * @param config the connector configuration, used to build the source info
+     * @return a fresh offset context at {@code change_id} 0
+     */
+    public static SQLiteOffsetContext initial(SQLiteConnectorConfig config) {
+        return new SQLiteOffsetContext(new SQLiteSourceInfo(config));
+    }
+
     /** Returns the last {@code change_id} consumed from {@code _debezium_cdc_log}. */
     public long getChangeId() {
         return changeId;
@@ -43,7 +56,13 @@ public class SQLiteOffsetContext extends CommonOffsetContext<SQLiteSourceInfo> {
 
     @Override
     public Map<String, ?> getOffset() {
-        return Map.of(CHANGE_ID_KEY, changeId);
+        Map<String, Object> offset = new HashMap<>();
+        if (getSnapshot().isPresent()) {
+            offset.put(AbstractSourceInfo.SNAPSHOT_KEY, getSnapshot().get().toString());
+            offset.put(SNAPSHOT_COMPLETED_KEY, snapshotCompleted);
+        }
+        offset.put(CHANGE_ID_KEY, changeId);
+        return offset;
     }
 
     @Override
