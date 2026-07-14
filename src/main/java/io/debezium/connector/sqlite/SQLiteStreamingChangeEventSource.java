@@ -15,17 +15,22 @@ import io.debezium.pipeline.source.spi.ChangeEventSource.ChangeEventSourceContex
 import io.debezium.pipeline.source.spi.StreamingChangeEventSource;
 
 /**
- * Streams ongoing changes from the SQLite {@code _debezium_cdc_log} table. This is a stub: {@link
- * #execute} runs the poll loop but does not read or dispatch rows yet.
+ * Streams ongoing changes from the SQLite {@code _debezium_cdc_log} table.
+ *
+ * <p>A stub: it establishes the resume point and idles until the task stops, without reading the log.
  */
 class SQLiteStreamingChangeEventSource
         implements StreamingChangeEventSource<SQLitePartition, SQLiteOffsetContext> {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SQLiteStreamingChangeEventSource.class);
 
+    private static final long IDLE_SLEEP_MS = 1_000;
+
     private final SQLiteConnectorConfig config;
     private final SQLiteConnection connection;
     private final SQLiteDatabaseSchema schema;
+
+    private SQLiteOffsetContext effectiveOffset;
 
     SQLiteStreamingChangeEventSource(SQLiteConnectorConfig config, SQLiteConnection connection, SQLiteDatabaseSchema schema) {
         this.config = config;
@@ -33,6 +38,11 @@ class SQLiteStreamingChangeEventSource
         this.schema = schema;
     }
 
+    /**
+     * Loads the schema and sets the resume point. The offset is null when nothing was stored and no
+     * snapshot ran, as with {@code snapshot.mode=no_data} on a first start; streaming then begins at
+     * the end of the log rather than replaying it.
+     */
     @Override
     public void init(SQLiteOffsetContext offsetContext) {
         // Load the schema for the case where the snapshot was skipped and did not load it.
@@ -42,6 +52,14 @@ class SQLiteStreamingChangeEventSource
         catch (SQLException e) {
             throw new DebeziumException("Failed to load the SQLite schema", e);
         }
+
+        if (offsetContext != null) {
+            effectiveOffset = offsetContext;
+            return;
+        }
+
+        effectiveOffset = SQLiteOffsetContext.initial(config);
+        effectiveOffset.setChangeId(connection.readMaxChangeId());
     }
 
     @Override
@@ -49,14 +67,17 @@ class SQLiteStreamingChangeEventSource
                         SQLitePartition partition,
                         SQLiteOffsetContext offsetContext)
             throws InterruptedException {
-        LOGGER.info("Starting SQLite streaming from change_id {}", offsetContext.getChangeId());
+        LOGGER.info("Starting SQLite streaming from change_id {}", effectiveOffset.getChangeId());
 
         while (context.isRunning()) {
-            // TODO: poll _debezium_cdc_log for rows with change_id > offsetContext.getChangeId()
-            // and dispatch each one via the EventDispatcher.
-            Thread.sleep(1_000);
+            Thread.sleep(IDLE_SLEEP_MS);
         }
 
         LOGGER.info("SQLite streaming stopped");
+    }
+
+    @Override
+    public SQLiteOffsetContext getOffsetContext() {
+        return effectiveOffset;
     }
 }

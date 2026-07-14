@@ -282,6 +282,32 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
     }
 
     @Test
+    public void shouldStreamFromTheCurrentLogPositionWhenTheSnapshotIsSkipped() throws Exception {
+        LogInterceptor streamingLog = new LogInterceptor(SQLiteStreamingChangeEventSource.class);
+
+        database.connection().execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)");
+        // no_data takes no snapshot, so nothing fixes the resume point on a first start.
+        insertCdcLogRow(5);
+        insertCdcLogRow(9);
+
+        Configuration config = Configuration.create()
+                .with(SQLiteConnectorConfig.DATABASE_FILE, database.databaseFile().toString())
+                .with(CommonConnectorConfig.TOPIC_PREFIX, TOPIC_PREFIX)
+                .with(SQLiteConnectorConfig.SNAPSHOT_MODE, "no_data")
+                .build();
+
+        start(SQLiteSourceConnector.class, config);
+        assertConnectorIsRunning();
+
+        Awaitility.await().atMost(10, TimeUnit.SECONDS)
+                .until(() -> streamingLog.containsMessage("Starting SQLite streaming from change_id 9"));
+
+        waitForAvailableRecords(1, TimeUnit.SECONDS);
+        assertConnectorIsRunning();
+        assertNoRecordsToConsume();
+    }
+
+    @Test
     public void shouldSnapshotAgainOnRestartForAlways() throws Exception {
         database.connection().execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)");
         database.connection().execute(

@@ -37,6 +37,7 @@ import io.debezium.pipeline.notification.NotificationService;
 import io.debezium.pipeline.signal.SignalProcessor;
 import io.debezium.pipeline.spi.Offsets;
 import io.debezium.relational.TableId;
+import io.debezium.relational.Tables.TableFilter;
 import io.debezium.schema.SchemaFactory;
 import io.debezium.schema.SchemaNameAdjuster;
 import io.debezium.snapshot.SnapshotterService;
@@ -111,9 +112,14 @@ public class SQLiteConnectorTask extends BaseSourceTask<SQLitePartition, SQLiteO
         // Install the capture triggers on every monitored table before the coordinator starts, so any
         // write from this point on is logged with a change_id and the snapshot-to-streaming handoff stays
         // consistent. Installation is idempotent (CREATE TRIGGER IF NOT EXISTS), so a restart is a no-op.
+        // The table list comes straight from the database, not the connector schema, which the snapshot
+        // and streaming sources load on their own paths.
+        final TableFilter tableFilter = connectorConfig.getTableFilters().dataCollectionFilter();
         try {
-            for (TableId tableId : schema.tableIds()) {
-                TriggerInstaller.install(connection, tableId.table());
+            for (TableId tableId : connection.getAllTableIds(null)) {
+                if (tableFilter.isIncluded(tableId)) {
+                    TriggerInstaller.install(connection, tableId.table());
+                }
             }
         }
         catch (SQLException e) {
