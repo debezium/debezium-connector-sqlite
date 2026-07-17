@@ -109,6 +109,39 @@ public class SQLiteStreamingIT extends AbstractAsyncEngineConnectorTest {
         assertThat(source(insert).getInt64("ts_ms")).isPositive();
     }
 
+    @Test
+    public void shouldDrainABacklogInChangeIdOrderAcrossBatches() throws Exception {
+        LogInterceptor streamingLog = new LogInterceptor(SQLiteStreamingChangeEventSource.class);
+
+        database.connection().execute("CREATE TABLE t (id INTEGER PRIMARY KEY, seq INTEGER)");
+
+        Configuration config = Configuration.create()
+                .with(SQLiteConnectorConfig.DATABASE_FILE, database.databaseFile().toString())
+                .with(CommonConnectorConfig.TOPIC_PREFIX, TOPIC_PREFIX)
+                .with(SQLiteConnectorConfig.SNAPSHOT_MODE, "no_data")
+                // A small batch forces the five changes to drain over several polls, so the test proves
+                // the order holds across batch boundaries.
+                .with(SQLiteConnectorConfig.CDC_LOG_BATCH_SIZE, 2)
+                .build();
+
+        start(SQLiteSourceConnector.class, config);
+        assertConnectorIsRunning();
+
+        Awaitility.await().atMost(10, TimeUnit.SECONDS)
+                .until(() -> streamingLog.containsMessage("Starting SQLite streaming from change_id 0"));
+
+        for (int i = 1; i <= 5; i++) {
+            database.connection().execute("INSERT INTO t (id, seq) VALUES (" + i + ", " + i + ")");
+        }
+
+        List<SourceRecord> streamed = consumeRecordsByTopic(5, false).recordsForTopic(TOPIC_PREFIX + ".t");
+        assertThat(streamed).hasSize(5);
+        assertThat(streamed.stream().map(record -> source(record).getInt64("change_id")).collect(Collectors.toList()))
+                .containsExactly(1L, 2L, 3L, 4L, 5L);
+        assertThat(streamed.stream().map(record -> after(record).getInt64("id")).collect(Collectors.toList()))
+                .containsExactly(1L, 2L, 3L, 4L, 5L);
+    }
+
     private static String operation(SourceRecord record) {
         return ((Struct) record.value()).getString(Envelope.FieldName.OPERATION);
     }
