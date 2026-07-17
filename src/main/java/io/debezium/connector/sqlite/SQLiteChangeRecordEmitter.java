@@ -18,6 +18,7 @@ import io.debezium.relational.Column;
 import io.debezium.relational.RelationalChangeRecordEmitter;
 import io.debezium.relational.Table;
 import io.debezium.util.Clock;
+import io.debezium.util.HexConverter;
 
 /**
  * Converts a {@code _debezium_cdc_log} row into a Debezium change record. The snapshot and streaming
@@ -103,9 +104,19 @@ class SQLiteChangeRecordEmitter extends RelationalChangeRecordEmitter<SQLitePart
 
     /**
      * Turns a decoded JSON value into the column value. An absent column and a JSON null both yield
-     * Java null.
+     * Java null. A blob is written as a tagged object {@code {"__dbz_hex__": "<hex>"}}, so a value that
+     * carries the marker is hex-decoded back to its byte array; every other value is read bare.
      */
     private static Object columnValue(Value value) {
-        return Value.isNull(value) ? null : value.asObject();
+        if (Value.isNull(value)) {
+            return null;
+        }
+        if (value.isDocument()) {
+            String hex = value.asDocument().getString(CdcLog.BLOB_HEX_MARKER);
+            if (hex != null) {
+                return HexConverter.convertFromHex(hex);
+            }
+        }
+        return value.asObject();
     }
 }
