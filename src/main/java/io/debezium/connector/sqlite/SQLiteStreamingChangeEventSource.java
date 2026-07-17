@@ -85,6 +85,10 @@ class SQLiteStreamingChangeEventSource
                         SQLiteOffsetContext offsetContext)
             throws InterruptedException {
         LOGGER.info("Starting SQLite streaming from change_id {}", effectiveOffset.getChangeId());
+        // The snapshot leaves the shared connection in manual-commit mode to hold its read view. Switch
+        // to autocommit so each poll is a fresh short read that sees new commits and lets SQLite
+        // checkpoint the WAL between polls.
+        enterAutocommit();
         Metronome metronome = Metronome.sleeper(config.getPollInterval(), clock);
 
         while (context.isRunning()) {
@@ -99,6 +103,15 @@ class SQLiteStreamingChangeEventSource
         }
 
         LOGGER.info("SQLite streaming stopped");
+    }
+
+    private void enterAutocommit() {
+        try {
+            connection.setAutoCommit(true);
+        }
+        catch (SQLException e) {
+            throw new DebeziumException("Failed to switch the streaming connection to autocommit", e);
+        }
     }
 
     private List<CdcLogRow> readBatch() {
