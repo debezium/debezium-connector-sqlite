@@ -7,6 +7,8 @@ package io.debezium.connector.sqlite;
 
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -75,6 +77,39 @@ public class SQLiteConnection extends JdbcConnection {
         String sql = String.format("SELECT COALESCE(MAX(%s), 0) FROM %s", CdcLog.CHANGE_ID, CdcLog.TABLE_NAME);
         return guarded("Failed to read the maximum change id",
                 () -> queryAndMap(sql, rs -> rs.next() ? rs.getLong(1) : 0L));
+    }
+
+    /**
+     * Reads the next batch of change rows after a cursor position, in {@code change_id} order. Each
+     * call is a short read in autocommit, bounded by {@code limit}, so it does not hold a read
+     * transaction open across the inter-poll sleep and block WAL checkpointing.
+     *
+     * @param afterChangeId the exclusive lower bound; the query returns rows with a larger change_id
+     * @param limit the maximum number of rows to return
+     * @return the matching rows in ascending {@code change_id} order, empty when none remain
+     * @throws SQLException if the query cannot be run
+     */
+    public List<CdcLogRow> readChanges(long afterChangeId, int limit) throws SQLException {
+        String sql = String.format(
+                "SELECT %s, %s, %s, %s, %s, %s FROM %s WHERE %s > ? ORDER BY %s ASC LIMIT %d",
+                CdcLog.CHANGE_ID, CdcLog.TABLE_NAME_COLUMN, CdcLog.OPERATION,
+                CdcLog.OLD_ROW_DATA, CdcLog.NEW_ROW_DATA, CdcLog.COMMITTED_AT,
+                CdcLog.TABLE_NAME, CdcLog.CHANGE_ID, CdcLog.CHANGE_ID, limit);
+        return prepareQueryAndMap(sql,
+                statement -> statement.setLong(1, afterChangeId),
+                resultSet -> {
+                    List<CdcLogRow> rows = new ArrayList<>();
+                    while (resultSet.next()) {
+                        rows.add(new CdcLogRow(
+                                resultSet.getLong(1),
+                                resultSet.getString(2),
+                                resultSet.getString(3),
+                                resultSet.getString(4),
+                                resultSet.getString(5),
+                                resultSet.getLong(6)));
+                    }
+                    return rows;
+                });
     }
 
     /**
