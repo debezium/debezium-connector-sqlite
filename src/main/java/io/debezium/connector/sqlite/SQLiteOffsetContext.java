@@ -16,6 +16,7 @@ import io.debezium.connector.SnapshotRecord;
 import io.debezium.connector.SnapshotType;
 import io.debezium.pipeline.CommonOffsetContext;
 import io.debezium.pipeline.txmetadata.TransactionContext;
+import io.debezium.relational.TableId;
 import io.debezium.spi.schema.DataCollectionId;
 
 /**
@@ -76,7 +77,7 @@ public class SQLiteOffsetContext extends CommonOffsetContext<SQLiteSourceInfo> {
 
     @Override
     public void event(DataCollectionId dataCollectionId, Instant instant) {
-        // Nothing to update yet; timestamp is read live from Instant.now() in SQLiteSourceInfo.
+        sourceInfo.setChange((TableId) dataCollectionId, instant, changeId);
     }
 
     @Override
