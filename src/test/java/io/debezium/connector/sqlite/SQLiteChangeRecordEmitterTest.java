@@ -67,6 +67,27 @@ class SQLiteChangeRecordEmitterTest {
     }
 
     @Test
+    void decodesATaggedBlobBackToItsBytes() {
+        Table table = table("id", "data");
+        Object[] values = emitter(Envelope.Operation.CREATE, table, null,
+                "{\"id\":1,\"data\":{\"" + CdcLog.BLOB_HEX_MARKER + "\":\"DEADBEEF\"}}")
+                .getNewColumnValues();
+
+        assertThat(values[1]).isInstanceOf(byte[].class);
+        assertThat((byte[]) values[1]).containsExactly(0xDE, 0xAD, 0xBE, 0xEF);
+    }
+
+    @Test
+    void decodesAnEmptyBlobToAnEmptyByteArray() {
+        Table table = table("id", "data");
+        Object[] values = emitter(Envelope.Operation.CREATE, table, null,
+                "{\"id\":1,\"data\":{\"" + CdcLog.BLOB_HEX_MARKER + "\":\"\"}}")
+                .getNewColumnValues();
+
+        assertThat((byte[]) values[1]).isEmpty();
+    }
+
+    @Test
     void insertHasNoOldValues() {
         Table table = table("id");
         SQLiteChangeRecordEmitter emitter = emitter(Envelope.Operation.CREATE, table, null, "{\"id\":1}");
