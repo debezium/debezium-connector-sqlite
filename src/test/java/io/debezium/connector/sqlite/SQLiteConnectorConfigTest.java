@@ -49,6 +49,12 @@ class SQLiteConnectorConfigTest {
     }
 
     @Test
+    void getCdcLogBatchSizeReturnsTheConfiguredValue() {
+        assertThat(configWith(Map.of()).getCdcLogBatchSize()).isEqualTo(1000);
+        assertThat(configWith(Map.of("cdc.log.batch.size", "50")).getCdcLogBatchSize()).isEqualTo(50);
+    }
+
+    @Test
     void pollIntervalIsInheritedWithDefault500() {
         // poll.interval.ms is provided by CommonConnectorConfig; the connector reuses it rather than
         // declaring its own, so it appears exactly once in the field set with the standard default.
