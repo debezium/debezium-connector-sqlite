@@ -53,6 +53,6 @@ class SQLiteChangeEventSourceFactory
 
     @Override
     public StreamingChangeEventSource<SQLitePartition, SQLiteOffsetContext> getStreamingChangeEventSource() {
-        return new SQLiteStreamingChangeEventSource(config, connectionFactory.mainConnection(), schema);
+        return new SQLiteStreamingChangeEventSource(config, connectionFactory.mainConnection(), schema, dispatcher, clock);
     }
 }
