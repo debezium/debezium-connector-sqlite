@@ -9,6 +9,7 @@ import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
 
 import io.debezium.config.CommonConnectorConfig;
+import io.debezium.connector.AbstractSourceInfo;
 import io.debezium.connector.AbstractSourceInfoStructMaker;
 
 /**
@@ -24,6 +25,8 @@ class SQLiteSourceInfoStructMaker extends AbstractSourceInfoStructMaker<SQLiteSo
         super.init(connector, version, config);
         schema = commonSchemaBuilder()
                 .name("io.debezium.connector.sqlite.Source")
+                .field(AbstractSourceInfo.TABLE_NAME_KEY, Schema.STRING_SCHEMA)
+                .field(SQLiteSourceInfo.CHANGE_ID_KEY, Schema.INT64_SCHEMA)
                 .build();
     }
 
@@ -34,6 +37,8 @@ class SQLiteSourceInfoStructMaker extends AbstractSourceInfoStructMaker<SQLiteSo
 
     @Override
     public Struct struct(SQLiteSourceInfo info) {
-        return commonStruct(info);
+        return commonStruct(info)
+                .put(AbstractSourceInfo.TABLE_NAME_KEY, info.tableName() != null ? info.tableName() : "")
+                .put(SQLiteSourceInfo.CHANGE_ID_KEY, info.changeId());
     }
 }
