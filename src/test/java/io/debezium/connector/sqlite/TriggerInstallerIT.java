@@ -51,10 +51,34 @@ public class TriggerInstallerIT {
         }
     }
 
+    @Test
+    void dropRemovesTheTriggersAndStopsCapture() throws Exception {
+        try (SqliteTestHelper helper = SqliteTestHelper.create()) {
+            JdbcConnection db = helper.connection();
+            db.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, name TEXT)");
+            TriggerInstaller.install(db, "orders");
+
+            TriggerInstaller.drop(db, "orders");
+
+            assertThat(triggerCount(db)).isZero();
+            db.execute("INSERT INTO orders (id, name) VALUES (1, 'a')");
+            assertThat(cdcRowCount(db)).isZero();
+        }
+    }
+
     /** The {@code new_row_data} of the most recent CDC log row. */
     private static String latestNewRow(JdbcConnection db) throws SQLException {
         String query = "SELECT " + CdcLog.NEW_ROW_DATA + " FROM " + CdcLog.TABLE_NAME
                 + " ORDER BY " + CdcLog.CHANGE_ID + " DESC LIMIT 1";
         return db.queryAndMap(query, rs -> rs.next() ? rs.getString(1) : null);
+    }
+
+    private static int triggerCount(JdbcConnection db) throws SQLException {
+        return db.queryAndMap("SELECT count(*) FROM sqlite_master WHERE type='trigger'",
+                rs -> rs.next() ? rs.getInt(1) : 0);
+    }
+
+    private static int cdcRowCount(JdbcConnection db) throws SQLException {
+        return db.queryAndMap("SELECT count(*) FROM " + CdcLog.TABLE_NAME, rs -> rs.next() ? rs.getInt(1) : 0);
     }
 }
