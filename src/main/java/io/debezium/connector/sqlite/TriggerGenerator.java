@@ -17,7 +17,8 @@ import java.util.stream.Collectors;
  */
 public final class TriggerGenerator {
 
-    private static final String TRIGGER_PREFIX = "_debezium_cdc_";
+    /** Prefix for generated trigger names, kept distinct so the triggers are easy to recognize. */
+    static final String TRIGGER_PREFIX = "_debezium_cdc_";
 
     /**
      * Columns per {@code json_object} call. It accepts at most 127 arguments, so 63 columns; a wider
