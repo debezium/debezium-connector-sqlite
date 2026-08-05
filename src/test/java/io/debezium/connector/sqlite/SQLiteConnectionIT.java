@@ -97,6 +97,22 @@ class SQLiteConnectionIT {
         assertThat(connection.readMaxChangeId()).isEqualTo(9L);
     }
 
+    @Test
+    void readSchemaVersionRisesOnDdlAndHoldsOnDml() throws SQLException {
+        long initial = connection.readSchemaVersion();
+
+        connection.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, name TEXT)");
+        long afterCreate = connection.readSchemaVersion();
+        assertThat(afterCreate).isGreaterThan(initial);
+
+        connection.execute("ALTER TABLE orders ADD COLUMN discount REAL");
+        long afterAlter = connection.readSchemaVersion();
+        assertThat(afterAlter).isGreaterThan(afterCreate);
+
+        connection.execute("INSERT INTO orders (id, name) VALUES (1, 'a')");
+        assertThat(connection.readSchemaVersion()).isEqualTo(afterAlter);
+    }
+
     private String journalMode() throws SQLException {
         return connection.queryAndMap("PRAGMA journal_mode", rs -> rs.next() ? rs.getString(1) : null);
     }

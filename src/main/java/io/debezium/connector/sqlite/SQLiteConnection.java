@@ -113,6 +113,17 @@ public class SQLiteConnection extends JdbcConnection {
     }
 
     /**
+     * Returns the database's {@code schema_version}, the header counter SQLite increments on every DDL
+     * statement. Streaming reads it at the top of each poll and re-reads the schema when it has risen,
+     * which is the only cross-connection signal that the schema changed. It moves for any DDL, including
+     * ones that touch no monitored table, so a change in the value is a prompt to look, not proof that a
+     * monitored table changed.
+     */
+    public long readSchemaVersion() throws SQLException {
+        return queryAndMap("PRAGMA schema_version", rs -> rs.next() ? rs.getLong(1) : 0L);
+    }
+
+    /**
      * Corrects a column's JDBC type to the one its SQLite affinity implies, since the driver reports a
      * type that ignores affinity. Defensive: the schema builder and value converter resolve affinity
      * from the declared type directly, so they do not rely on this.
