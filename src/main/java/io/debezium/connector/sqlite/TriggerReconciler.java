@@ -7,6 +7,7 @@ package io.debezium.connector.sqlite;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -25,6 +26,10 @@ import io.debezium.relational.TableId;
  * need to know which DDL statement ran. For each monitored table it generates the trigger SQL it wants
  * and compares it against the SQL actually installed; where they differ, it rebuilds. One rule covers a
  * column added, dropped, or renamed, and a table whose triggers are missing entirely.
+ *
+ * <p>It also drops connector triggers left behind for a table no longer monitored. An
+ * {@code ALTER TABLE ... RENAME TO} leaves the old name's triggers attached to the renamed table, still
+ * firing, so without this cleanup every write would be captured twice.
  */
 public final class TriggerReconciler {
 
@@ -44,9 +49,11 @@ public final class TriggerReconciler {
      */
     public static List<String> reconcile(SQLiteConnection connection, SQLiteDatabaseSchema schema) throws SQLException {
         Map<String, String> installed = connection.readConnectorTriggerSql();
+        Set<String> monitoredTables = new LinkedHashSet<>();
         List<String> rebuilt = new ArrayList<>();
         for (TableId tableId : schema.tableIds()) {
             String table = tableId.table();
+            monitoredTables.add(table);
             List<String> columns = TriggerInstaller.readColumnNames(connection, table);
             List<String> desired = TriggerGenerator.createTriggers(table, columns);
             if (!triggersMatch(desired, TriggerGenerator.triggerNames(table), installed)) {
@@ -55,7 +62,28 @@ public final class TriggerReconciler {
                 LOGGER.info("Rebuilt the capture triggers for table '{}' after a schema change", table);
             }
         }
+        for (String orphan : orphanedTriggers(installed.keySet(), monitoredTables)) {
+            connection.execute("DROP TRIGGER IF EXISTS " + orphan);
+            LOGGER.info("Dropped orphaned capture trigger '{}' left by a table that is no longer monitored", orphan);
+        }
         return rebuilt;
+    }
+
+    /**
+     * The connector triggers that no longer belong to any monitored table, so they should be dropped.
+     * The expected triggers are the ones every monitored table should have; an installed connector
+     * trigger outside that set is an orphan, as after a rename. Only connector-prefixed names are
+     * returned, so a user's own trigger is never treated as an orphan even if it were passed in.
+     */
+    static List<String> orphanedTriggers(Set<String> installedTriggerNames, Set<String> monitoredTables) {
+        Set<String> expected = monitoredTables.stream()
+                .flatMap(table -> TriggerGenerator.triggerNames(table).stream())
+                .collect(Collectors.toSet());
+        return installedTriggerNames.stream()
+                .filter(name -> name.startsWith(TriggerGenerator.TRIGGER_PREFIX))
+                .filter(name -> !expected.contains(name))
+                .sorted()
+                .collect(Collectors.toList());
     }
 
     /**
