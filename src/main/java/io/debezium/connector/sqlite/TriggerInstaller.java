@@ -47,6 +47,19 @@ public final class TriggerInstaller {
         runInTransaction(connection, statements);
     }
 
+    /**
+     * Drops a table's three capture triggers if they exist. Used to remove triggers left behind for a
+     * table the connector no longer captures, such as after an {@code ALTER TABLE ... RENAME TO}, where
+     * the renamed table keeps its old triggers and they would otherwise keep firing.
+     *
+     * @param connection an open connection to the SQLite database
+     * @param table the source table whose triggers to drop
+     * @throws SQLException if the triggers cannot be dropped
+     */
+    public static void drop(JdbcConnection connection, String table) throws SQLException {
+        connection.execute(TriggerGenerator.dropTriggers(table).toArray(new String[0]));
+    }
+
     /** Runs the statements in a single transaction, restoring the connection's autocommit mode after. */
     private static void runInTransaction(JdbcConnection connection, List<String> statements) throws SQLException {
         Connection jdbc = connection.connection();
