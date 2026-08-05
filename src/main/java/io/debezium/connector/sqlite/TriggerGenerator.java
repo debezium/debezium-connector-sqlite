@@ -20,6 +20,9 @@ public final class TriggerGenerator {
     /** Prefix for generated trigger names, kept distinct so the triggers are easy to recognize. */
     static final String TRIGGER_PREFIX = "_debezium_cdc_";
 
+    /** The DML suffixes that name a table's three capture triggers, in insert, update, delete order. */
+    private static final List<String> TRIGGER_SUFFIXES = List.of("insert", "update", "delete");
+
     /**
      * Columns per {@code json_object} call. It accepts at most 127 arguments, so 63 columns; a wider
      * row is serialized in chunks and merged. Set below 63 to leave headroom.
@@ -49,6 +52,25 @@ public final class TriggerGenerator {
                 trigger(tableName, "delete", "DELETE", CdcLog.OPERATION_DELETE, oldRow, "NULL"));
     }
 
+    /**
+     * The name of one capture trigger, {@code _debezium_cdc_<table>_<suffix>}. The drop path and the
+     * create path both build names here so they can never disagree.
+     */
+    static String triggerName(String tableName, String suffix) {
+        return TRIGGER_PREFIX + tableName + "_" + suffix;
+    }
+
+    /**
+     * The {@code DROP TRIGGER IF EXISTS} statements for a table's three capture triggers, in the same
+     * insert, update, delete order {@link #createTriggers} builds them.
+     */
+    public static List<String> dropTriggers(String tableName) {
+        return TRIGGER_SUFFIXES.stream()
+                .map(suffix -> "DROP TRIGGER IF EXISTS " + triggerName(tableName, suffix))
+                .collect(Collectors.toList());
+    }
+
+    /** Builds one {@code CREATE TRIGGER} statement for the given operation. */
     private static String trigger(String tableName, String suffix, String timing,
                                   String operation, String oldData, String newData) {
         return String.format("""
@@ -58,7 +80,7 @@ public final class TriggerGenerator {
                     INSERT INTO %s (%s)
                     VALUES ('%s', '%s', %s, %s, %s);
                 END""",
-                TRIGGER_PREFIX + tableName + "_" + suffix,
+                triggerName(tableName, suffix),
                 timing,
                 tableName,
                 CdcLog.TABLE_NAME,
