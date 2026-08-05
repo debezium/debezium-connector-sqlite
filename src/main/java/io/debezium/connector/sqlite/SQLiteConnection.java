@@ -8,7 +8,9 @@ package io.debezium.connector.sqlite;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -121,6 +123,26 @@ public class SQLiteConnection extends JdbcConnection {
      */
     public long readSchemaVersion() throws SQLException {
         return queryAndMap("PRAGMA schema_version", rs -> rs.next() ? rs.getLong(1) : 0L);
+    }
+
+    /**
+     * Reads the CDC capture triggers the connector installed, as a name-to-SQL map. It returns only
+     * triggers whose name carries the connector's prefix, so a user's own triggers are left out, and it
+     * reads all of them in one query so the reconcile can both compare a table's triggers and find
+     * orphaned ones. The SQL is the text SQLite stored, which it keeps verbatim except that it strips
+     * {@code IF NOT EXISTS}.
+     */
+    public Map<String, String> readConnectorTriggerSql() throws SQLException {
+        return queryAndMap("SELECT name, sql FROM sqlite_master WHERE type='trigger'", rs -> {
+            Map<String, String> triggers = new LinkedHashMap<>();
+            while (rs.next()) {
+                String name = rs.getString(1);
+                if (name.startsWith(TriggerGenerator.TRIGGER_PREFIX)) {
+                    triggers.put(name, rs.getString(2));
+                }
+            }
+            return triggers;
+        });
     }
 
     /**
