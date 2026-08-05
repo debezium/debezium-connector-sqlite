@@ -8,8 +8,10 @@ package io.debezium.connector.sqlite;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
@@ -60,6 +62,27 @@ class TriggerReconcilerTest {
         installed.remove(TriggerGenerator.triggerNames(TABLE).get(0));
 
         assertThat(TriggerReconciler.triggersMatch(desired, TriggerGenerator.triggerNames(TABLE), installed)).isFalse();
+    }
+
+    @Test
+    void findsTriggersOfAnUnmonitoredTableAsOrphans() {
+        Set<String> installed = new LinkedHashSet<>(TriggerGenerator.triggerNames("orders"));
+        installed.addAll(TriggerGenerator.triggerNames("sales_orders"));
+
+        // Only sales_orders is still monitored, so the orders triggers are orphans, as after a rename.
+        List<String> orphans = TriggerReconciler.orphanedTriggers(installed, Set.of("sales_orders"));
+
+        assertThat(orphans).containsExactlyInAnyOrderElementsOf(TriggerGenerator.triggerNames("orders"));
+    }
+
+    @Test
+    void leavesAUsersOwnTriggerAlone() {
+        Set<String> installed = new LinkedHashSet<>(TriggerGenerator.triggerNames("orders"));
+        installed.add("user_audit");
+
+        List<String> orphans = TriggerReconciler.orphanedTriggers(installed, Set.of("orders"));
+
+        assertThat(orphans).isEmpty();
     }
 
     /** The trigger SQL as SQLite records it: the generated statements with {@code IF NOT EXISTS} stripped. */
