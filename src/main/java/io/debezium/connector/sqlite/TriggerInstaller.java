@@ -81,7 +81,7 @@ public final class TriggerInstaller {
     }
 
     /** Reads a table's column names in definition order from {@code PRAGMA table_info}. */
-    private static List<String> readColumnNames(JdbcConnection connection, String table) throws SQLException {
+    static List<String> readColumnNames(JdbcConnection connection, String table) throws SQLException {
         return connection.queryAndMap("PRAGMA table_info(" + table + ")", rs -> {
             List<String> names = new ArrayList<>();
             while (rs.next()) {

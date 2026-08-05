@@ -70,6 +70,13 @@ public final class TriggerGenerator {
                 .collect(Collectors.toList());
     }
 
+    /** The names of a table's three capture triggers, in insert, update, delete order. */
+    static List<String> triggerNames(String tableName) {
+        return TRIGGER_SUFFIXES.stream()
+                .map(suffix -> triggerName(tableName, suffix))
+                .collect(Collectors.toList());
+    }
+
     /** Builds one {@code CREATE TRIGGER} statement for the given operation. */
     private static String trigger(String tableName, String suffix, String timing,
                                   String operation, String oldData, String newData) {
