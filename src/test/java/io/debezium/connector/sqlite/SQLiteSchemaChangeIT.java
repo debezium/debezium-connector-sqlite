@@ -7,6 +7,8 @@ package io.debezium.connector.sqlite;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -149,7 +151,136 @@ public class SQLiteSchemaChangeIT extends AbstractAsyncEngineConnectorTest {
         assertThat(reconcileLog.containsMessage("Rebuilt the capture triggers for table 'orders'")).isFalse();
     }
 
+    @Test
+    public void shouldCaptureANewTableCreatedWhileStreaming() throws Exception {
+        LogInterceptor streamingLog = new LogInterceptor(SQLiteStreamingChangeEventSource.class);
+
+        database.connection().execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, name TEXT)");
+        database.installTriggers("orders");
+
+        Configuration config = Configuration.create()
+                .with(SQLiteConnectorConfig.DATABASE_FILE, database.databaseFile().toString())
+                .with(CommonConnectorConfig.TOPIC_PREFIX, TOPIC_PREFIX)
+                .with(SQLiteConnectorConfig.SNAPSHOT_MODE, "no_data")
+                .build();
+
+        start(SQLiteSourceConnector.class, config);
+        assertConnectorIsRunning();
+        Awaitility.await().atMost(10, TimeUnit.SECONDS)
+                .until(() -> streamingLog.containsMessage("Starting SQLite streaming from change_id 0"));
+
+        // A table created mid-stream must get triggers from the reconcile and then stream.
+        database.connection().execute("CREATE TABLE audit (id INTEGER PRIMARY KEY, note TEXT)");
+        Awaitility.await().atMost(10, TimeUnit.SECONDS).until(() -> triggerCountFor("audit") == 3);
+
+        database.connection().execute("INSERT INTO audit (id, note) VALUES (1, 'x')");
+
+        List<SourceRecord> records = consumeRecordsByTopic(1, false).recordsForTopic(TOPIC_PREFIX + ".audit");
+        assertThat(records).hasSize(1);
+        assertThat(after(records.get(0)).getString("note")).isEqualTo("x");
+    }
+
+    @Test
+    public void shouldKeepStreamingAcrossARenameWithoutDoubleCapture() throws Exception {
+        LogInterceptor streamingLog = new LogInterceptor(SQLiteStreamingChangeEventSource.class);
+
+        database.connection().execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, name TEXT)");
+        database.installTriggers("orders");
+
+        Configuration config = Configuration.create()
+                .with(SQLiteConnectorConfig.DATABASE_FILE, database.databaseFile().toString())
+                .with(CommonConnectorConfig.TOPIC_PREFIX, TOPIC_PREFIX)
+                .with(SQLiteConnectorConfig.SNAPSHOT_MODE, "no_data")
+                .build();
+
+        start(SQLiteSourceConnector.class, config);
+        assertConnectorIsRunning();
+        Awaitility.await().atMost(10, TimeUnit.SECONDS)
+                .until(() -> streamingLog.containsMessage("Starting SQLite streaming from change_id 0"));
+
+        // Stream the pre-rename change under the old name first, so its topic is not raced by the rename.
+        database.connection().execute("INSERT INTO orders (id, name) VALUES (1, 'a')");
+        assertThat(consumeRecordsByTopic(1, false).recordsForTopic(TOPIC_PREFIX + ".orders")).hasSize(1);
+
+        database.connection().execute("ALTER TABLE orders RENAME TO sales");
+        // The reconcile installs triggers for the new name and drops the old name's triggers. Wait for
+        // both, so the next write can only fire the new trigger.
+        Awaitility.await().atMost(10, TimeUnit.SECONDS)
+                .until(() -> triggerCountFor("sales") == 3 && triggerCountFor("orders") == 0);
+
+        long before = maxChangeId();
+        database.connection().execute("INSERT INTO sales (id, name) VALUES (2, 'b')");
+        // No double capture: the single insert produced exactly one CDC row, under the new name.
+        assertThat(tablesLoggedAfter(before)).containsExactly("sales");
+
+        List<SourceRecord> sales = consumeRecordsByTopic(1, false).recordsForTopic(TOPIC_PREFIX + ".sales");
+        assertThat(sales).hasSize(1);
+        assertThat(after(sales.get(0)).getString("name")).isEqualTo("b");
+    }
+
+    @Test
+    public void shouldSkipARowForAnUnmonitoredTableAndKeepStreaming() throws Exception {
+        LogInterceptor streamingLog = new LogInterceptor(SQLiteStreamingChangeEventSource.class);
+
+        database.connection().execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, name TEXT)");
+        database.installTriggers("orders");
+
+        Configuration config = Configuration.create()
+                .with(SQLiteConnectorConfig.DATABASE_FILE, database.databaseFile().toString())
+                .with(CommonConnectorConfig.TOPIC_PREFIX, TOPIC_PREFIX)
+                .with(SQLiteConnectorConfig.SNAPSHOT_MODE, "no_data")
+                .build();
+
+        start(SQLiteSourceConnector.class, config);
+        assertConnectorIsRunning();
+        Awaitility.await().atMost(10, TimeUnit.SECONDS)
+                .until(() -> streamingLog.containsMessage("Starting SQLite streaming from change_id 0"));
+
+        // A leftover CDC row for a table the connector does not monitor, as a rename or drop would leave.
+        database.connection().execute("INSERT INTO " + CdcLog.TABLE_NAME
+                + " (table_name, operation, new_row_data, committed_at) VALUES ('ghost', 'c', '{\"id\":1}', 0)");
+        database.connection().execute("INSERT INTO orders (id, name) VALUES (1, 'a')");
+
+        // The ghost row is skipped and streaming carries on to the real change.
+        List<SourceRecord> records = consumeRecordsByTopic(1, false).recordsForTopic(TOPIC_PREFIX + ".orders");
+        assertThat(records).hasSize(1);
+        assertThat(after(records.get(0)).getString("name")).isEqualTo("a");
+        assertThat(streamingLog.containsMessage("Skipping change")).isTrue();
+    }
+
     private static Struct after(SourceRecord record) {
         return ((Struct) record.value()).getStruct(Envelope.FieldName.AFTER);
+    }
+
+    private long maxChangeId() throws SQLException {
+        return database.connection().queryAndMap(
+                "SELECT COALESCE(MAX(" + CdcLog.CHANGE_ID + "), 0) FROM " + CdcLog.TABLE_NAME,
+                rs -> rs.next() ? rs.getLong(1) : 0L);
+    }
+
+    private List<String> tablesLoggedAfter(long changeId) throws SQLException {
+        return database.connection().queryAndMap(
+                "SELECT " + CdcLog.TABLE_NAME_COLUMN + " FROM " + CdcLog.TABLE_NAME
+                        + " WHERE " + CdcLog.CHANGE_ID + " > " + changeId + " ORDER BY " + CdcLog.CHANGE_ID,
+                rs -> {
+                    List<String> tables = new ArrayList<>();
+                    while (rs.next()) {
+                        tables.add(rs.getString(1));
+                    }
+                    return tables;
+                });
+    }
+
+    private long triggerCountFor(String table) throws SQLException {
+        String prefix = "_debezium_cdc_" + table + "_";
+        return database.connection().queryAndMap("SELECT name FROM sqlite_master WHERE type='trigger'", rs -> {
+            long count = 0;
+            while (rs.next()) {
+                if (rs.getString(1).startsWith(prefix)) {
+                    count++;
+                }
+            }
+            return count;
+        });
     }
 }

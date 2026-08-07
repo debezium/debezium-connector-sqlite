@@ -8,6 +8,7 @@ package io.debezium.connector.sqlite;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -118,13 +119,16 @@ class SQLiteStreamingChangeEventSource
      */
     private void reconcileIfSchemaChanged() {
         long current = readSchemaVersion();
-        if (lastSchemaVersion != null && current == lastSchemaVersion) {
-            return;
+        if (lastSchemaVersion == null || current != lastSchemaVersion) {
+            if (lastSchemaVersion != null) {
+                LOGGER.debug("SQLite schema_version changed from {} to {}; reconciling capture triggers",
+                        lastSchemaVersion, current);
+            }
+            reconcileNow(current);
         }
-        if (lastSchemaVersion != null) {
-            LOGGER.debug("SQLite schema_version changed from {} to {}; reconciling capture triggers",
-                    lastSchemaVersion, current);
-        }
+    }
+
+    private void reconcileNow(long schemaVersion) {
         try {
             schema.refresh(connection);
             TriggerReconciler.reconcile(connection, schema);
@@ -132,7 +136,7 @@ class SQLiteStreamingChangeEventSource
         catch (SQLException e) {
             throw new DebeziumException("Failed to reconcile capture triggers after a schema change", e);
         }
-        lastSchemaVersion = current;
+        lastSchemaVersion = schemaVersion;
     }
 
     private long readSchemaVersion() {
@@ -163,23 +167,45 @@ class SQLiteStreamingChangeEventSource
     }
 
     private void dispatch(SQLitePartition partition, CdcLogRow row) throws InterruptedException {
-        TableId tableId = tableIdFor(row.tableName());
-        Table table = schema.tableFor(tableId);
-        // Advance the offset before dispatch so the enqueued record carries this row as its resume point.
+        // Advance the offset first so a skipped row is not read again on the next poll.
         effectiveOffset.setChangeId(row.changeId());
-        effectiveOffset.event(tableId, Instant.ofEpochMilli(row.committedAt()));
+        Optional<TableId> tableId = resolveTable(row.tableName());
+        if (tableId.isEmpty()) {
+            LOGGER.warn("Skipping change {} for table '{}' that is not monitored; it was likely renamed or dropped",
+                    row.changeId(), row.tableName());
+            return;
+        }
+        Table table = schema.tableFor(tableId.get());
+        effectiveOffset.event(tableId.get(), Instant.ofEpochMilli(row.committedAt()));
         SQLiteChangeRecordEmitter emitter = new SQLiteChangeRecordEmitter(partition, effectiveOffset,
                 SQLiteChangeRecordEmitter.operationFor(row.operation()), table,
                 row.oldRowData(), row.newRowData(), clock, config);
-        dispatcher.dispatchDataChangeEvent(partition, tableId, emitter);
+        dispatcher.dispatchDataChangeEvent(partition, tableId.get(), emitter);
     }
 
-    private TableId tableIdFor(String tableName) {
+    /**
+     * Resolves a change row's table name to a {@link TableId}. A row can name a table the loaded schema
+     * does not have when a {@code CREATE} or {@code RENAME} happened that this poll has not caught yet, so
+     * it reconciles once, if the schema has moved since the last reconcile, and looks again. An empty
+     * result means the table is gone, renamed away or dropped, and the caller skips the row.
+     */
+    private Optional<TableId> resolveTable(String tableName) {
+        Optional<TableId> found = findTable(tableName);
+        if (found.isPresent()) {
+            return found;
+        }
+        long current = readSchemaVersion();
+        if (lastSchemaVersion == null || current != lastSchemaVersion) {
+            reconcileNow(current);
+            found = findTable(tableName);
+        }
+        return found;
+    }
+
+    private Optional<TableId> findTable(String tableName) {
         return schema.tableIds().stream()
                 .filter(id -> tableName.equals(id.table()))
-                .findFirst()
-                .orElseThrow(() -> new DebeziumException("Streaming encountered a change for table '" + tableName
-                        + "' that is not in the schema; schema changes during streaming are not yet supported."));
+                .findFirst();
     }
 
     @Override
