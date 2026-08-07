@@ -116,6 +116,39 @@ public class SQLiteSchemaChangeIT extends AbstractAsyncEngineConnectorTest {
         assertThat(after(records.get(1)).getString("note")).isEqualTo("hello");
     }
 
+    @Test
+    public void shouldNotRebuildTriggersForAnUnrelatedSchemaChange() throws Exception {
+        LogInterceptor streamingLog = new LogInterceptor(SQLiteStreamingChangeEventSource.class);
+        LogInterceptor reconcileLog = new LogInterceptor(TriggerReconciler.class);
+
+        database.connection().execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, name TEXT)");
+        database.installTriggers("orders");
+
+        Configuration config = Configuration.create()
+                .with(SQLiteConnectorConfig.DATABASE_FILE, database.databaseFile().toString())
+                .with(CommonConnectorConfig.TOPIC_PREFIX, TOPIC_PREFIX)
+                .with(SQLiteConnectorConfig.SNAPSHOT_MODE, "no_data")
+                .build();
+
+        start(SQLiteSourceConnector.class, config);
+        assertConnectorIsRunning();
+        Awaitility.await().atMost(10, TimeUnit.SECONDS)
+                .until(() -> streamingLog.containsMessage("Starting SQLite streaming from change_id 0"));
+
+        database.connection().execute("INSERT INTO orders (id, name) VALUES (1, 'a')");
+        // A CREATE INDEX bumps schema_version but changes no table's columns. The poll loop reconciles to
+        // a no-op, and streaming carries on.
+        database.connection().execute("CREATE INDEX idx_orders_name ON orders (name)");
+        database.connection().execute("INSERT INTO orders (id, name) VALUES (2, 'b')");
+
+        List<SourceRecord> records = consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".orders");
+        assertThat(records).hasSize(2);
+        assertThat(after(records.get(1)).getString("name")).isEqualTo("b");
+        // Consuming the row written after the index guarantees the poll loop saw the bump, so no rebuild
+        // means the bump was correctly treated as a no-op.
+        assertThat(reconcileLog.containsMessage("Rebuilt the capture triggers for table 'orders'")).isFalse();
+    }
+
     private static Struct after(SourceRecord record) {
         return ((Struct) record.value()).getStruct(Envelope.FieldName.AFTER);
     }
