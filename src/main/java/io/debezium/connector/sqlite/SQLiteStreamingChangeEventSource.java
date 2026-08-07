@@ -43,6 +43,9 @@ class SQLiteStreamingChangeEventSource
 
     private SQLiteOffsetContext effectiveOffset;
 
+    /** The {@code schema_version} seen at the last reconcile; null until the first poll seeds it. */
+    private Long lastSchemaVersion;
+
     SQLiteStreamingChangeEventSource(SQLiteConnectorConfig config,
                                      SQLiteConnection connection,
                                      SQLiteDatabaseSchema schema,
@@ -92,6 +95,7 @@ class SQLiteStreamingChangeEventSource
         Metronome metronome = Metronome.sleeper(config.getPollInterval(), clock);
 
         while (context.isRunning()) {
+            reconcileIfSchemaChanged();
             List<CdcLogRow> batch = readBatch();
             if (batch.isEmpty()) {
                 metronome.pause();
@@ -103,6 +107,41 @@ class SQLiteStreamingChangeEventSource
         }
 
         LOGGER.info("SQLite streaming stopped");
+    }
+
+    /**
+     * Reconciles the capture triggers when {@code schema_version} has moved since the last check, so a
+     * schema change made while streaming is picked up before the next batch. The first poll always
+     * reconciles, which also catches a change made between startup and the start of streaming, such as
+     * during the snapshot. A bump with no relevant change, for example a {@code CREATE INDEX}, reconciles
+     * to a no-op.
+     */
+    private void reconcileIfSchemaChanged() {
+        long current = readSchemaVersion();
+        if (lastSchemaVersion != null && current == lastSchemaVersion) {
+            return;
+        }
+        if (lastSchemaVersion != null) {
+            LOGGER.debug("SQLite schema_version changed from {} to {}; reconciling capture triggers",
+                    lastSchemaVersion, current);
+        }
+        try {
+            schema.refresh(connection);
+            TriggerReconciler.reconcile(connection, schema);
+        }
+        catch (SQLException e) {
+            throw new DebeziumException("Failed to reconcile capture triggers after a schema change", e);
+        }
+        lastSchemaVersion = current;
+    }
+
+    private long readSchemaVersion() {
+        try {
+            return connection.readSchemaVersion();
+        }
+        catch (SQLException e) {
+            throw new DebeziumException("Failed to read the SQLite schema_version", e);
+        }
     }
 
     private void enterAutocommit() {
