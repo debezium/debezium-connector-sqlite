@@ -80,6 +80,42 @@ public class SQLiteSchemaChangeIT extends AbstractAsyncEngineConnectorTest {
         assertThat(after(records.get(0)).getString("note")).isEqualTo("hello");
     }
 
+    @Test
+    public void shouldCaptureAColumnAddedWhileStreaming() throws Exception {
+        LogInterceptor streamingLog = new LogInterceptor(SQLiteStreamingChangeEventSource.class);
+        LogInterceptor reconcileLog = new LogInterceptor(TriggerReconciler.class);
+
+        database.connection().execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, name TEXT)");
+        // Install the triggers up front so the startup reconcile is a no-op. That keeps the only "Rebuilt"
+        // log the mid-stream one this test waits on.
+        database.installTriggers("orders");
+
+        Configuration config = Configuration.create()
+                .with(SQLiteConnectorConfig.DATABASE_FILE, database.databaseFile().toString())
+                .with(CommonConnectorConfig.TOPIC_PREFIX, TOPIC_PREFIX)
+                .with(SQLiteConnectorConfig.SNAPSHOT_MODE, "no_data")
+                .build();
+
+        start(SQLiteSourceConnector.class, config);
+        assertConnectorIsRunning();
+        Awaitility.await().atMost(10, TimeUnit.SECONDS)
+                .until(() -> streamingLog.containsMessage("Starting SQLite streaming from change_id 0"));
+
+        database.connection().execute("INSERT INTO orders (id, name) VALUES (1, 'a')");
+
+        // Add a column mid-stream and wait for the poll loop to notice the schema_version bump and rebuild
+        // the trigger, so the next write is captured with the new column rather than racing the reconcile.
+        database.connection().execute("ALTER TABLE orders ADD COLUMN note TEXT");
+        Awaitility.await().atMost(10, TimeUnit.SECONDS)
+                .until(() -> reconcileLog.containsMessage("Rebuilt the capture triggers for table 'orders'"));
+
+        database.connection().execute("INSERT INTO orders (id, name, note) VALUES (2, 'b', 'hello')");
+
+        List<SourceRecord> records = consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".orders");
+        assertThat(records).hasSize(2);
+        assertThat(after(records.get(1)).getString("note")).isEqualTo("hello");
+    }
+
     private static Struct after(SourceRecord record) {
         return ((Struct) record.value()).getStruct(Envelope.FieldName.AFTER);
     }
