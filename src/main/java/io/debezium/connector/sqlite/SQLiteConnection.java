@@ -44,9 +44,6 @@ public class SQLiteConnection extends JdbcConnection {
      */
     static final String MINIMUM_VERSION = "3.35.0";
 
-    /** {@link #MINIMUM_VERSION} split into its numeric major, minor, and patch parts for comparison. */
-    private static final int[] MINIMUM_VERSION_PARTS = parseVersionParts(MINIMUM_VERSION);
-
     /**
      * Opens a connection to the SQLite database at the given file path.
      *
@@ -135,57 +132,11 @@ public class SQLiteConnection extends JdbcConnection {
     public void verifyMinimumVersion() {
         String version = guarded("Failed to read the SQLite version",
                 () -> queryAndMap("SELECT sqlite_version()", rs -> rs.next() ? rs.getString(1) : null));
-        if (!isAtLeastMinimumVersion(version)) {
+        if (!SQLiteVersion.isAtLeast(version, MINIMUM_VERSION)) {
             throw new DebeziumException("SQLite " + MINIMUM_VERSION + " or later is required, but the "
                     + "database reports '" + version + "'.");
         }
         LOGGER.info("SQLite version {} meets the minimum required {}", version, MINIMUM_VERSION);
-    }
-
-    /**
-     * Returns whether an {@code X.Y.Z} version string is at or above {@link #MINIMUM_VERSION}. A
-     * null or unparseable version is treated as below the minimum so the guard fails closed.
-     *
-     * @param version the version string reported by {@code sqlite_version()}
-     * @return true if the version is at least the minimum, false otherwise
-     */
-    static boolean isAtLeastMinimumVersion(String version) {
-        if (version == null) {
-            return false;
-        }
-        int[] parts = parseVersionParts(version);
-        for (int i = 0; i < MINIMUM_VERSION_PARTS.length; i++) {
-            int part = i < parts.length ? parts[i] : 0;
-            if (part != MINIMUM_VERSION_PARTS[i]) {
-                return part > MINIMUM_VERSION_PARTS[i];
-            }
-        }
-        return true;
-    }
-
-    /**
-     * Splits an {@code X.Y.Z} version string into its numeric parts, parsing the leading digits of
-     * each dot-separated token.
-     */
-    private static int[] parseVersionParts(String version) {
-        String[] tokens = version.trim().split("\\.");
-        int[] parts = new int[tokens.length];
-        for (int i = 0; i < tokens.length; i++) {
-            parts[i] = parseLeadingInt(tokens[i]);
-        }
-        return parts;
-    }
-
-    /**
-     * Parses the leading run of digits in a version token, returning -1 if the token does not start
-     * with a digit. Comparing -1 against any minimum part fails the version guard.
-     */
-    private static int parseLeadingInt(String token) {
-        int end = 0;
-        while (end < token.length() && Character.isDigit(token.charAt(end))) {
-            end++;
-        }
-        return end == 0 ? -1 : Integer.parseInt(token.substring(0, end));
     }
 
     /** A JDBC call that yields a value and may fail with a checked {@link SQLException}. */
