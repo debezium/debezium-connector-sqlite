@@ -90,18 +90,11 @@ class SQLiteConnectionIT {
     @Test
     void readMaxChangeIdReturnsLargestChangeId() throws SQLException {
         connection.createCdcLogTable();
-        insertCdcRow(5);
-        insertCdcRow(9);
-        insertCdcRow(7);
+        SqliteTestHelper.insertCdcLogRow(connection, "users", 5, CdcLog.OPERATION_CREATE);
+        SqliteTestHelper.insertCdcLogRow(connection, "users", 9, CdcLog.OPERATION_CREATE);
+        SqliteTestHelper.insertCdcLogRow(connection, "users", 7, CdcLog.OPERATION_CREATE);
 
         assertThat(connection.readMaxChangeId()).isEqualTo(9L);
-    }
-
-    private void insertCdcRow(long changeId) throws SQLException {
-        connection.execute(String.format(
-                "INSERT INTO %s (%s, %s, %s, %s) VALUES (%d, 'users', 'c', 0)",
-                CdcLog.TABLE_NAME, CdcLog.CHANGE_ID, CdcLog.TABLE_NAME_COLUMN,
-                CdcLog.OPERATION, CdcLog.COMMITTED_AT, changeId));
     }
 
     private String journalMode() throws SQLException {

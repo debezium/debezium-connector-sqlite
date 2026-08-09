@@ -32,7 +32,7 @@ public class SQLiteSnapshotConsistencyIT {
 
             writer.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)");
             writer.execute("INSERT INTO t (id) VALUES (1)");
-            insertCdcLogRow(writer, 1);
+            SqliteTestHelper.insertCdcLogRow(writer, "t", 1, CdcLog.OPERATION_CREATE);
 
             // Open the read view exactly as the snapshot does: auto-commit off, then read the watermark
             // as the first statement.
@@ -40,7 +40,7 @@ public class SQLiteSnapshotConsistencyIT {
             assertThat(snapshot.readMaxChangeId()).isEqualTo(1L);
 
             // A concurrent connection commits a new change and a new row after the view opened.
-            insertCdcLogRow(writer, 2);
+            SqliteTestHelper.insertCdcLogRow(writer, "t", 2, CdcLog.OPERATION_CREATE);
             writer.execute("INSERT INTO t (id) VALUES (2)");
 
             // The snapshot's view still sees the old watermark and not the new row, so the new change is
@@ -50,13 +50,6 @@ public class SQLiteSnapshotConsistencyIT {
 
             snapshot.connection().rollback();
         }
-    }
-
-    private static void insertCdcLogRow(SQLiteConnection connection, long changeId) throws SQLException {
-        connection.execute(String.format(
-                "INSERT INTO %s (%s, %s, %s, %s) VALUES (%d, 't', '%s', 0)",
-                CdcLog.TABLE_NAME, CdcLog.CHANGE_ID, CdcLog.TABLE_NAME_COLUMN, CdcLog.OPERATION,
-                CdcLog.COMMITTED_AT, changeId, CdcLog.OPERATION_CREATE));
     }
 
     private static List<Long> readIds(SQLiteConnection connection) throws SQLException {

@@ -104,6 +104,23 @@ public final class SqliteTestHelper implements AutoCloseable {
     }
 
     /**
+     * Inserts a single row into {@code _debezium_cdc_log} with {@code committed_at} 0, for tests that
+     * seed the log directly rather than through triggers.
+     *
+     * @param connection the connection to write through
+     * @param table the source table name to record on the row
+     * @param changeId the {@code change_id} for the row
+     * @param operation the operation code to record, such as {@link CdcLog#OPERATION_CREATE}
+     * @throws SQLException if the insert cannot be run
+     */
+    public static void insertCdcLogRow(JdbcConnection connection, String table, long changeId, String operation) throws SQLException {
+        connection.execute(String.format(
+                "INSERT INTO %s (%s, %s, %s, %s) VALUES (%d, '%s', '%s', 0)",
+                CdcLog.TABLE_NAME, CdcLog.CHANGE_ID, CdcLog.TABLE_NAME_COLUMN, CdcLog.OPERATION,
+                CdcLog.COMMITTED_AT, changeId, table, operation));
+    }
+
+    /**
      * Closes the connection and deletes the temporary database file along with its {@code -wal} and
      * {@code -shm} side files.
      */
