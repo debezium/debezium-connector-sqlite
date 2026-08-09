@@ -63,11 +63,11 @@ public class SQLiteConnection extends JdbcConnection {
      * reads the mode the pragma actually returned rather than trusting that it ran, because when
      * another connection holds an exclusive lock the pragma silently leaves the mode unchanged.
      *
-     * @throws DebeziumException if SQLite did not switch to WAL mode
-     * @throws SQLException if the pragma cannot be run
+     * @throws DebeziumException if SQLite did not switch to WAL mode or the pragma cannot be run
      */
-    public void enforceWalMode() throws SQLException {
-        String mode = queryAndMap("PRAGMA journal_mode=WAL", rs -> rs.next() ? rs.getString(1) : null);
+    public void enforceWalMode() {
+        String mode = guarded("Failed to set WAL journal mode",
+                () -> queryAndMap("PRAGMA journal_mode=WAL", rs -> rs.next() ? rs.getString(1) : null));
         if (!JOURNAL_MODE_WAL.equalsIgnoreCase(mode)) {
             throw new DebeziumException("Failed to set WAL journal mode (SQLite reported '" + mode
                     + "'). Another connection may hold an exclusive lock on the database file.");
@@ -79,30 +79,34 @@ public class SQLiteConnection extends JdbcConnection {
      * rather than enforce it.
      *
      * @return the value {@code PRAGMA journal_mode} reports, or null if the pragma returns no row
-     * @throws SQLException if the pragma cannot be run
+     * @throws DebeziumException if the pragma cannot be run
      */
-    public String journalMode() throws SQLException {
-        return queryAndMap("PRAGMA journal_mode", rs -> rs.next() ? rs.getString(1) : null);
+    public String journalMode() {
+        return guarded("Failed to read the journal mode",
+                () -> queryAndMap("PRAGMA journal_mode", rs -> rs.next() ? rs.getString(1) : null));
     }
 
     /**
      * Creates the {@code _debezium_cdc_log} table if it does not already exist, using the frozen DDL
      * shared with the rest of the connector.
      *
-     * @throws SQLException if the table cannot be created
+     * @throws DebeziumException if the table cannot be created
      */
-    public void createCdcLogTable() throws SQLException {
-        execute(CdcLog.CREATE_TABLE_DDL);
+    public void createCdcLogTable() {
+        guarded("Failed to create the CDC log table", () -> execute(CdcLog.CREATE_TABLE_DDL));
     }
 
     /**
      * Returns the largest {@code change_id} in {@code _debezium_cdc_log}, the snapshot high-water
      * mark streaming resumes from. {@code COALESCE} yields 0 for an empty log, since {@code MAX} over
      * no rows is {@code NULL}.
+     *
+     * @throws DebeziumException if the log cannot be read
      */
-    public long readMaxChangeId() throws SQLException {
+    public long readMaxChangeId() {
         String sql = String.format("SELECT COALESCE(MAX(%s), 0) FROM %s", CdcLog.CHANGE_ID, CdcLog.TABLE_NAME);
-        return queryAndMap(sql, rs -> rs.next() ? rs.getLong(1) : 0L);
+        return guarded("Failed to read the maximum change id",
+                () -> queryAndMap(sql, rs -> rs.next() ? rs.getLong(1) : 0L));
     }
 
     /**
@@ -126,11 +130,11 @@ public class SQLiteConnection extends JdbcConnection {
      * Reads the SQLite version reported by the driver and fails if it is below
      * {@link #MINIMUM_VERSION}.
      *
-     * @throws DebeziumException if the database version is too old
-     * @throws SQLException if the version cannot be read
+     * @throws DebeziumException if the database version is too old or cannot be read
      */
-    public void verifyMinimumVersion() throws SQLException {
-        String version = queryAndMap("SELECT sqlite_version()", rs -> rs.next() ? rs.getString(1) : null);
+    public void verifyMinimumVersion() {
+        String version = guarded("Failed to read the SQLite version",
+                () -> queryAndMap("SELECT sqlite_version()", rs -> rs.next() ? rs.getString(1) : null));
         if (!isAtLeastMinimumVersion(version)) {
             throw new DebeziumException("SQLite " + MINIMUM_VERSION + " or later is required, but the "
                     + "database reports '" + version + "'.");
@@ -182,5 +186,21 @@ public class SQLiteConnection extends JdbcConnection {
             end++;
         }
         return end == 0 ? -1 : Integer.parseInt(token.substring(0, end));
+    }
+
+    /** A JDBC call that yields a value and may fail with a checked {@link SQLException}. */
+    @FunctionalInterface
+    private interface JdbcCall<T> {
+        T call() throws SQLException;
+    }
+
+    /** Runs a JDBC call, rethrowing any {@link SQLException} as a {@link DebeziumException}. */
+    private static <T> T guarded(String failureMessage, JdbcCall<T> call) {
+        try {
+            return call.call();
+        }
+        catch (SQLException e) {
+            throw new DebeziumException(failureMessage, e);
+        }
     }
 }

@@ -17,6 +17,7 @@ import org.apache.kafka.connect.connector.Task;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.debezium.DebeziumException;
 import io.debezium.config.Configuration;
 import io.debezium.connector.common.RelationalBaseSourceConnector;
 
@@ -93,7 +94,7 @@ public class SQLiteSourceConnector extends RelationalBaseSourceConnector {
                         + "switch it to WAL when the task starts.", path, mode);
             }
         }
-        catch (SQLException e) {
+        catch (SQLException | DebeziumException e) {
             fileValue.addErrorMessage("Unable to connect to SQLite database file '" + path + "': " + e.getMessage());
         }
     }

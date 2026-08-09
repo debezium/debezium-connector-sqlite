@@ -96,13 +96,13 @@ public class SQLiteConnectorTask extends BaseSourceTask<SQLitePartition, SQLiteO
         connection = connectionFactory.mainConnection();
         try {
             connection.connect();
-            connection.enforceWalMode();
-            connection.createCdcLogTable();
-            connection.verifyMinimumVersion();
         }
         catch (SQLException e) {
-            throw new DebeziumException("Failed to initialize the SQLite database at " + databaseFilePath, e);
+            throw new DebeziumException("Failed to connect to the SQLite database at " + databaseFilePath, e);
         }
+        connection.enforceWalMode();
+        connection.createCdcLogTable();
+        connection.verifyMinimumVersion();
 
         this.schema = new SQLiteDatabaseSchema(taskContext, topicNamingStrategy);
         try {
