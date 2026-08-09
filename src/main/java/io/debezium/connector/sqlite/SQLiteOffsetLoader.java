@@ -27,15 +27,11 @@ public class SQLiteOffsetLoader implements OffsetContext.Loader<SQLiteOffsetCont
     @Override
     public SQLiteOffsetContext load(Map<String, ?> offset) {
         SQLiteSourceInfo sourceInfo = new SQLiteSourceInfo(config);
-        SQLiteOffsetContext ctx = new SQLiteOffsetContext(sourceInfo);
-
         if (offset == null || offset.isEmpty()) {
-            ctx.setChangeId(0L);
+            return new SQLiteOffsetContext(sourceInfo);
         }
-        else {
-            long changeId = ((Number) offset.get(SQLiteOffsetContext.CHANGE_ID_KEY)).longValue();
-            ctx.setChangeId(changeId);
-        }
-        return ctx;
+        long changeId = ((Number) offset.get(SQLiteOffsetContext.CHANGE_ID_KEY)).longValue();
+        return new SQLiteOffsetContext(sourceInfo, changeId,
+                loadSnapshot(offset).orElse(null), loadSnapshotCompleted(offset));
     }
 }

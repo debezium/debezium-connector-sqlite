@@ -26,11 +26,19 @@ import io.debezium.pipeline.CommonOffsetContext;
  */
 class SQLiteOffsetContextTest {
 
-    private static SQLiteOffsetContext newOffset() {
-        Configuration config = Configuration.from(Map.of(
+    private static SQLiteConnectorConfig config() {
+        return new SQLiteConnectorConfig(Configuration.from(Map.of(
                 SQLiteConnectorConfig.DATABASE_FILE.name(), "test.db",
-                CommonConnectorConfig.TOPIC_PREFIX.name(), "test"));
-        return SQLiteOffsetContext.initial(new SQLiteConnectorConfig(config));
+                CommonConnectorConfig.TOPIC_PREFIX.name(), "test")));
+    }
+
+    private static SQLiteOffsetContext newOffset() {
+        return SQLiteOffsetContext.initial(config());
+    }
+
+    /** Persists an offset the way the framework does, then loads it back through the loader. */
+    private static SQLiteOffsetContext reload(SQLiteOffsetContext offset) {
+        return new SQLiteOffsetLoader(config()).load(offset.getOffset());
     }
 
     @Test
@@ -77,6 +85,42 @@ class SQLiteOffsetContextTest {
         assertThat(map).doesNotContainKey(AbstractSourceInfo.SNAPSHOT_KEY);
         assertThat(map).doesNotContainKey(CommonOffsetContext.SNAPSHOT_COMPLETED_KEY);
         assertThat(map.get(SQLiteOffsetContext.CHANGE_ID_KEY)).isEqualTo(0L);
+    }
+
+    @Test
+    void loaderRestoresChangeId() {
+        SQLiteOffsetContext offset = newOffset();
+        offset.setChangeId(42L);
+
+        assertThat(reload(offset).getChangeId()).isEqualTo(42L);
+    }
+
+    @Test
+    void loaderRestoresInProgressSnapshot() {
+        SQLiteOffsetContext offset = newOffset();
+        offset.preSnapshotStart(false);
+        offset.setChangeId(7L);
+
+        SQLiteOffsetContext reloaded = reload(offset);
+
+        assertThat(reloaded.isInitialSnapshotRunning()).isTrue();
+        Map<String, ?> map = reloaded.getOffset();
+        assertThat(map.get(AbstractSourceInfo.SNAPSHOT_KEY)).isEqualTo("INITIAL");
+        assertThat(map.get(CommonOffsetContext.SNAPSHOT_COMPLETED_KEY)).isEqualTo(false);
+        assertThat(map.get(SQLiteOffsetContext.CHANGE_ID_KEY)).isEqualTo(7L);
+    }
+
+    @Test
+    void loaderRestoresCompletedSnapshot() {
+        SQLiteOffsetContext offset = newOffset();
+        offset.preSnapshotStart(false);
+        offset.preSnapshotCompletion();
+        offset.setChangeId(3L);
+
+        SQLiteOffsetContext reloaded = reload(offset);
+
+        assertThat(reloaded.isInitialSnapshotRunning()).isFalse();
+        assertThat(reloaded.getChangeId()).isEqualTo(3L);
     }
 
     @Test

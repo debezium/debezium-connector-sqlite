@@ -12,6 +12,8 @@ import java.util.Map;
 import org.apache.kafka.connect.data.Schema;
 
 import io.debezium.connector.AbstractSourceInfo;
+import io.debezium.connector.SnapshotRecord;
+import io.debezium.connector.SnapshotType;
 import io.debezium.pipeline.CommonOffsetContext;
 import io.debezium.pipeline.txmetadata.TransactionContext;
 import io.debezium.spi.schema.DataCollectionId;
@@ -31,6 +33,27 @@ public class SQLiteOffsetContext extends CommonOffsetContext<SQLiteSourceInfo> {
 
     public SQLiteOffsetContext(SQLiteSourceInfo sourceInfo) {
         super(sourceInfo);
+    }
+
+    /**
+     * Restores an offset context from persisted state, including the snapshot markers, so a restart
+     * resumes in the same phase it stopped in.
+     *
+     * @param sourceInfo the source info for this connector
+     * @param changeId the last {@code change_id} consumed before the restart
+     * @param snapshot the snapshot type in progress at the restart, or null if none was
+     * @param snapshotCompleted whether an initial or blocking snapshot had completed
+     */
+    public SQLiteOffsetContext(SQLiteSourceInfo sourceInfo, long changeId, SnapshotType snapshot, boolean snapshotCompleted) {
+        super(sourceInfo, snapshotCompleted);
+        this.changeId = changeId;
+        if (this.snapshotCompleted) {
+            postSnapshotCompletion();
+        }
+        else {
+            setSnapshot(snapshot);
+            sourceInfo.setSnapshot(snapshot != null ? SnapshotRecord.TRUE : SnapshotRecord.FALSE);
+        }
     }
 
     /**
