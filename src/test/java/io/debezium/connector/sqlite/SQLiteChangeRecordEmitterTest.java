@@ -16,6 +16,7 @@ import io.debezium.DebeziumException;
 import io.debezium.config.CommonConnectorConfig;
 import io.debezium.config.Configuration;
 import io.debezium.data.Envelope;
+import io.debezium.junit.logging.LogInterceptor;
 import io.debezium.relational.Column;
 import io.debezium.relational.Table;
 import io.debezium.relational.TableId;
@@ -103,6 +104,30 @@ class SQLiteChangeRecordEmitterTest {
 
         assertThat(emitter.getNewColumnValues()).isEmpty();
         assertThat(emitter.getOldColumnValues()).hasSize(1);
+    }
+
+    @Test
+    void warnsWhenACapturedRowIsMissingASchemaColumn() {
+        LogInterceptor log = new LogInterceptor(SQLiteChangeRecordEmitter.class);
+        Table table = table("id", "name", "note");
+
+        // A row a stale trigger wrote before an ADD COLUMN was reflected: 'note' is absent from the JSON.
+        Object[] values = emitter(Envelope.Operation.CREATE, table, null, "{\"id\":1,\"name\":\"a\"}")
+                .getNewColumnValues();
+
+        assertThat(values[2]).isNull();
+        assertThat(log.containsWarnMessage("is missing column(s)")).isTrue();
+    }
+
+    @Test
+    void doesNotWarnForAnExplicitJsonNullColumn() {
+        LogInterceptor log = new LogInterceptor(SQLiteChangeRecordEmitter.class);
+        Table table = table("id", "note");
+
+        // A present column with a JSON null value is a real null, not a stale capture.
+        emitter(Envelope.Operation.CREATE, table, null, "{\"id\":1,\"note\":null}").getNewColumnValues();
+
+        assertThat(log.containsWarnMessage("is missing column(s)")).isFalse();
     }
 
     @Test

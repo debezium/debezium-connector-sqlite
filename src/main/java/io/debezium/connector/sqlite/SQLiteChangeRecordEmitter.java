@@ -6,7 +6,11 @@
 package io.debezium.connector.sqlite;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import io.debezium.DebeziumException;
 import io.debezium.data.Envelope;
@@ -26,6 +30,8 @@ import io.debezium.util.HexConverter;
  * builds the key, value, and envelope structs from the table schema and the raw column data.
  */
 class SQLiteChangeRecordEmitter extends RelationalChangeRecordEmitter<SQLitePartition> {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(SQLiteChangeRecordEmitter.class);
 
     private final Envelope.Operation operation;
     private final Table table;
@@ -68,27 +74,45 @@ class SQLiteChangeRecordEmitter extends RelationalChangeRecordEmitter<SQLitePart
 
     @Override
     protected Object[] getOldColumnValues() {
-        return decode(oldRowData);
+        // Warn from the old side only for a delete, where it is the row's one present side.
+        return decode(oldRowData, newRowData == null);
     }
 
     @Override
     protected Object[] getNewColumnValues() {
-        return decode(newRowData);
+        return decode(newRowData, newRowData != null);
     }
 
     /**
      * Decodes one side of the change into an array in {@link Table#columns()} order. A null string is
      * the absent side of an insert or delete and decodes to an empty array.
+     *
+     * <p>A column the current schema has but the captured JSON does not carry means the capture trigger
+     * was stale when the row was written, from an {@code ALTER TABLE} that raced the trigger rebuild. The
+     * value was never captured, so it is emitted as null and, when this is the row's present side, a
+     * warning names the columns so the loss is visible.
      */
-    private Object[] decode(String rowData) {
+    private Object[] decode(String rowData, boolean warnOnStaleCapture) {
         if (rowData == null) {
             return new Object[0];
         }
         Document document = parse(rowData);
         List<Column> columns = table.columns();
         Object[] values = new Object[columns.size()];
+        List<String> missing = null;
         for (int i = 0; i < columns.size(); i++) {
-            values[i] = columnValue(document.get(columns.get(i).name()));
+            String name = columns.get(i).name();
+            if (warnOnStaleCapture && !document.has(name)) {
+                if (missing == null) {
+                    missing = new ArrayList<>();
+                }
+                missing.add(name);
+            }
+            values[i] = columnValue(document.get(name));
+        }
+        if (missing != null) {
+            LOGGER.warn("Change event for table '{}' is missing column(s) {} that the current schema expects; "
+                    + "the capture trigger was stale when the row was written, so they are null", table.id(), missing);
         }
         return values;
     }
