@@ -11,23 +11,12 @@ import java.util.Locale;
 import io.debezium.util.Strings;
 
 /**
- * The five type affinities SQLite assigns to a column.
+ * The five type affinities SQLite assigns to a column, each mapped to the JDBC type a column of that
+ * affinity is given.
  *
- * <p>SQLite stores a column's declared type verbatim and derives one of these five affinities from
- * it using five ordered, case-insensitive substring rules (SQLite datatypes, section 3.1 at
- * https://www.sqlite.org/datatype3.html):
- *
- * <ol>
- * <li>the declared type contains {@code INT}: {@link #INTEGER};</li>
- * <li>else it contains {@code CHAR}, {@code CLOB}, or {@code TEXT}: {@link #TEXT};</li>
- * <li>else it contains {@code BLOB} or is empty: {@link #BLOB};</li>
- * <li>else it contains {@code REAL}, {@code FLOA}, or {@code DOUB}: {@link #REAL};</li>
- * <li>else: {@link #NUMERIC}.</li>
- * </ol>
- *
- * <p>The rules are substring matches, not equality, so {@code POINT} resolves to {@link #INTEGER}
- * because it contains {@code INT}, and {@code BOOLEAN}, {@code DATE}, {@code DATETIME}, and
- * {@code DECIMAL} all fall through to {@link #NUMERIC}.
+ * <p>SQLite stores a column's declared type verbatim and derives its affinity with case-insensitive
+ * substring rules, implemented by {@link #of(String)}. See SQLite datatypes, section 3.1, at
+ * https://www.sqlite.org/datatype3.html.
  */
 enum SQLiteTypeAffinity {
 
@@ -44,10 +33,8 @@ enum SQLiteTypeAffinity {
     }
 
     /**
-     * The JDBC type ({@link Types}) a column of this affinity is given, used to correct the
-     * driver-reported type so a column's JDBC type stays consistent with its affinity:
-     * INTEGER to {@code BIGINT}, REAL to {@code DOUBLE}, TEXT to {@code VARCHAR}, BLOB to
-     * {@code VARBINARY}, and NUMERIC to {@code NUMERIC}.
+     * The JDBC type a column of this affinity is given, used to correct the driver-reported type so
+     * a column's JDBC type stays consistent with its affinity.
      *
      * @return the {@link Types} constant for this affinity
      */
