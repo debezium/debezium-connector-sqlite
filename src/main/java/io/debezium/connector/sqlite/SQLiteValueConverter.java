@@ -17,24 +17,11 @@ import io.debezium.relational.ValueConverterProvider;
  * Maps SQLite columns to Kafka Connect schemas and converts column values, switching on the
  * column's {@link SQLiteTypeAffinity}.
  *
- * <p>{@link #schemaBuilder(Column)} returns the Connect schema for a column's affinity, and
- * {@link #converter(Column, Field)} returns the matching per-affinity function that adapts a value
- * to that schema's Java type. A converter adapts a value whose storage class agrees with the
- * column's affinity. SQLite's dynamic typing lets a value's storage class differ from the affinity,
- * and a value that cannot be represented in the column's schema (a blob or non-numeric text in a
- * numeric column, a blob in a text column, or a number or text in a blob column) makes the converter
- * throw. The framework's {@code event.converting.failure.handling.mode} then decides the outcome:
- * {@code fail} stops the connector, {@code warn} logs the column and leaves the field null, and
- * {@code skip} leaves the field null quietly.
- *
- * <p>Leaving the field null works for a nullable column, and for a non-nullable column that has a
- * default the schema default takes over, but a non-nullable column with no default has no null to
- * fall back on and the record then fails downstream. When {@code nonnull.affinity.mismatch.fallback} is
- * enabled and the failure mode is {@code warn} or {@code skip}, the converter instead substitutes a
- * type placeholder for that case (0 for INTEGER, 0.0 for REAL and NUMERIC, an empty string for TEXT,
- * and empty bytes for BLOB), so such a value keeps flowing rather than failing. Under {@code fail} the
- * placeholder does not apply and the mismatch stops the connector. The connector resolves this gating
- * and passes the result to the constructor.
+ * <p>SQLite's dynamic typing lets a value's storage class differ from the column's affinity. A value
+ * that cannot be represented in the column's schema makes the converter throw, which the framework's
+ * {@code event.converting.failure.handling.mode} turns into a stop, a warning, or a skipped field.
+ * When {@code nonnull.affinity.mismatch.fallback} is enabled, a non-nullable column with no default
+ * gets a type placeholder instead so the value keeps flowing.
  */
 class SQLiteValueConverter implements ValueConverterProvider {
 
