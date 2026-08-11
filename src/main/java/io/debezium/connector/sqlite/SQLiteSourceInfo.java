@@ -11,10 +11,8 @@ import io.debezium.config.CommonConnectorConfig;
 import io.debezium.connector.common.BaseSourceInfo;
 
 /**
- * Carries the {@code source} metadata block included in every change event.
- *
- * <p>Add connector-specific fields here (e.g. the last processed {@code change_id}).
- * Any field added here must also be registered in {@link SQLiteSourceInfoStructMaker}.
+ * Carries the {@code source} metadata block included in every change event. Fields added here must
+ * also be registered in {@link SQLiteSourceInfoStructMaker}.
  */
 public class SQLiteSourceInfo extends BaseSourceInfo {
 

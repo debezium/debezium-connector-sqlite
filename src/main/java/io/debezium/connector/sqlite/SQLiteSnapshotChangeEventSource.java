@@ -23,15 +23,10 @@ import io.debezium.snapshot.SnapshotterService;
 import io.debezium.util.Clock;
 
 /**
- * Performs the initial snapshot of the SQLite data source by reading every monitored table and
- * emitting a read ({@code r}) record per row.
- *
- * <p>The {@link RelationalSnapshotChangeEventSource base class} drives the snapshot inside a single
- * read transaction. The streaming resume point is the largest {@code change_id} in
- * {@code _debezium_cdc_log} read by {@link #determineSnapshotOffset}. SQLite WAL mode opens a
- * consistent read view on the first {@code SELECT} of the transaction, so reading the high-water mark
- * there fixes both the resume point and the view: any change logged after it is invisible to the
- * snapshot and left for streaming, with no gap and no duplicate.
+ * Performs the initial snapshot, emitting a read ({@code r}) record per row of every monitored table.
+ * The {@link RelationalSnapshotChangeEventSource base class} drives it inside one WAL read
+ * transaction. Reading the high-water mark in {@link #determineSnapshotOffset} as the first statement
+ * opens a consistent view, so any change logged after it is left for streaming with no gap or duplicate.
  */
 class SQLiteSnapshotChangeEventSource extends RelationalSnapshotChangeEventSource<SQLitePartition, SQLiteOffsetContext> {
 

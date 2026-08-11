@@ -17,19 +17,15 @@ import io.debezium.jdbc.JdbcConnection;
 import io.debezium.relational.ColumnEditor;
 
 /**
- * A JDBC connection to a single SQLite database file.
- *
- * <p>This class owns the connection concerns the task drives at startup: it builds the
- * {@code jdbc:sqlite:<path>} URL, switches the file to WAL journal mode and verifies the switch took
- * effect, creates the {@code _debezium_cdc_log} table, and confirms the SQLite version is recent
- * enough. SQLite reaches its database through a file path rather than a host and port, so the
- * inherited relational connection fields are unused and the URL is built from the file path alone.
+ * A JDBC connection to a single SQLite database file. SQLite reaches its database through a file path
+ * rather than a host and port, so the URL is built from the path and the inherited relational
+ * connection fields are unused.
  */
 public class SQLiteConnection extends JdbcConnection {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SQLiteConnection.class);
 
-    /** JDBC URL prefix for the SQLite driver; the database file path is appended to it. */
+    /** JDBC URL prefix; the database file path is appended. */
     private static final String URL_PREFIX = "jdbc:sqlite:";
 
     /** SQLite quotes identifiers with double quotes. */
@@ -44,11 +40,6 @@ public class SQLiteConnection extends JdbcConnection {
      */
     static final String MINIMUM_VERSION = "3.35.0";
 
-    /**
-     * Opens a connection to the SQLite database at the given file path.
-     *
-     * @param databaseFilePath the path to the {@code .db} file the connector monitors
-     */
     public SQLiteConnection(String databaseFilePath) {
         super(JdbcConfiguration.empty(),
                 config -> DriverManager.getConnection(URL_PREFIX + databaseFilePath),
@@ -56,11 +47,8 @@ public class SQLiteConnection extends JdbcConnection {
     }
 
     /**
-     * Switches the database to WAL journal mode and confirms SQLite honored the switch. The check
-     * reads the mode the pragma actually returned rather than trusting that it ran, because when
-     * another connection holds an exclusive lock the pragma silently leaves the mode unchanged.
-     *
-     * @throws DebeziumException if SQLite did not switch to WAL mode or the pragma cannot be run
+     * Switches the database to WAL journal mode and confirms SQLite honored it: when another
+     * connection holds an exclusive lock the pragma silently leaves the mode unchanged.
      */
     public void enforceWalMode() {
         String mode = guarded("Failed to set WAL journal mode",
@@ -71,35 +59,18 @@ public class SQLiteConnection extends JdbcConnection {
         }
     }
 
-    /**
-     * Reads the current journal mode without changing it, for callers that want to inspect the mode
-     * rather than enforce it.
-     *
-     * @return the value {@code PRAGMA journal_mode} reports, or null if the pragma returns no row
-     * @throws DebeziumException if the pragma cannot be run
-     */
+    /** Reads the current journal mode without changing it, or null if the pragma returns no row. */
     public String journalMode() {
         return guarded("Failed to read the journal mode",
                 () -> queryAndMap("PRAGMA journal_mode", rs -> rs.next() ? rs.getString(1) : null));
     }
 
-    /**
-     * Creates the {@code _debezium_cdc_log} table if it does not already exist, using the frozen DDL
-     * shared with the rest of the connector.
-     *
-     * @throws DebeziumException if the table cannot be created
-     */
+    /** Creates the {@code _debezium_cdc_log} table if it does not exist. */
     public void createCdcLogTable() {
         guarded("Failed to create the CDC log table", () -> execute(CdcLog.CREATE_TABLE_DDL));
     }
 
-    /**
-     * Returns the largest {@code change_id} in {@code _debezium_cdc_log}, the snapshot high-water
-     * mark streaming resumes from. {@code COALESCE} yields 0 for an empty log, since {@code MAX} over
-     * no rows is {@code NULL}.
-     *
-     * @throws DebeziumException if the log cannot be read
-     */
+    /** The largest {@code change_id} in {@code _debezium_cdc_log}, or 0 for an empty log; the resume point. */
     public long readMaxChangeId() {
         String sql = String.format("SELECT COALESCE(MAX(%s), 0) FROM %s", CdcLog.CHANGE_ID, CdcLog.TABLE_NAME);
         return guarded("Failed to read the maximum change id",
@@ -107,28 +78,16 @@ public class SQLiteConnection extends JdbcConnection {
     }
 
     /**
-     * Resets a column's JDBC type from its declared type using SQLite's affinity rules, replacing the
-     * type the JDBC driver reports. The driver's type ignores affinity: it returns a {@code BLOB}
-     * column and a column with no declared type as {@code VARCHAR} and a {@code BOOLEAN} as
-     * {@code INTEGER}. The connector's schema builder and value converter both resolve the affinity
-     * from the declared type string, so they do not depend on this corrected JDBC type. The
-     * correction is defensive: it keeps the column's JDBC type consistent with its affinity for any
-     * framework path that falls back to the driver-reported type.
-     *
-     * @param column the column editor seeded from the driver metadata
-     * @return the column editor with its JDBC type corrected to the affinity's type
+     * Corrects a column's JDBC type to the one its SQLite affinity implies, since the driver reports a
+     * type that ignores affinity. Defensive: the schema builder and value converter resolve affinity
+     * from the declared type directly, so they do not rely on this.
      */
     @Override
     protected ColumnEditor overrideColumn(ColumnEditor column) {
         return column.jdbcType(SQLiteTypeAffinity.of(column.typeName()).jdbcType());
     }
 
-    /**
-     * Reads the SQLite version reported by the driver and fails if it is below
-     * {@link #MINIMUM_VERSION}.
-     *
-     * @throws DebeziumException if the database version is too old or cannot be read
-     */
+    /** Fails if the database's SQLite version is below {@link #MINIMUM_VERSION}. */
     public void verifyMinimumVersion() {
         String version = guarded("Failed to read the SQLite version",
                 () -> queryAndMap("SELECT sqlite_version()", rs -> rs.next() ? rs.getString(1) : null));

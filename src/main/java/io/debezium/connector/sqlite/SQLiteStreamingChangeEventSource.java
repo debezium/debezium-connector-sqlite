@@ -12,12 +12,8 @@ import io.debezium.pipeline.source.spi.ChangeEventSource.ChangeEventSourceContex
 import io.debezium.pipeline.source.spi.StreamingChangeEventSource;
 
 /**
- * Streams ongoing changes from the SQLite {@code _debezium_cdc_log} table.
- *
- * <p>Implement {@link #execute} in Phase 1 to poll new rows from {@code _debezium_cdc_log}
- * and dispatch them via the {@link io.debezium.pipeline.EventDispatcher}. The loop must
- * check {@link ChangeEventSourceContext#isRunning()} and exit cleanly when it returns
- * {@code false}.
+ * Streams ongoing changes from the SQLite {@code _debezium_cdc_log} table. This is a stub: {@link
+ * #execute} runs the poll loop but does not read or dispatch rows yet.
  */
 class SQLiteStreamingChangeEventSource
         implements StreamingChangeEventSource<SQLitePartition, SQLiteOffsetContext> {
@@ -39,7 +35,7 @@ class SQLiteStreamingChangeEventSource
 
         while (context.isRunning()) {
             // TODO: poll _debezium_cdc_log for rows with change_id > offsetContext.getChangeId()
-            // and dispatch each one via the EventDispatcher. Implemented in Phase 1.
+            // and dispatch each one via the EventDispatcher.
             Thread.sleep(1_000);
         }
 

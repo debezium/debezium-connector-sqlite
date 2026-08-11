@@ -14,12 +14,8 @@ final class SQLiteVersion {
     }
 
     /**
-     * Returns whether an {@code X.Y.Z} version is at or above a minimum. A null or unparseable
+     * Returns whether an {@code X.Y.Z} version is at or above the minimum. A null or unparseable
      * version is treated as below the minimum so a version guard fails closed.
-     *
-     * @param version the version string to test, as reported by {@code sqlite_version()}
-     * @param minimum the inclusive lower bound, as an {@code X.Y.Z} string
-     * @return true if {@code version} is at least {@code minimum}, false otherwise
      */
     static boolean isAtLeast(String version, String minimum) {
         if (version == null) {
@@ -36,7 +32,6 @@ final class SQLiteVersion {
         return true;
     }
 
-    /** Splits an {@code X.Y.Z} version string into the numeric parts of its dot-separated tokens. */
     private static int[] parseParts(String version) {
         String[] tokens = version.trim().split("\\.");
         int[] parts = new int[tokens.length];
@@ -46,10 +41,7 @@ final class SQLiteVersion {
         return parts;
     }
 
-    /**
-     * Parses the leading run of digits in a version token, returning -1 if the token does not start
-     * with a digit. Comparing -1 against any minimum part fails the version guard.
-     */
+    /** Parses the leading digits of a version token, or -1 if it does not start with a digit, which fails the guard. */
     private static int parseLeadingInt(String token) {
         int end = 0;
         while (end < token.length() && Character.isDigit(token.charAt(end))) {

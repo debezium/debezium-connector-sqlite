@@ -10,11 +10,8 @@ import java.util.Map;
 import io.debezium.pipeline.spi.OffsetContext;
 
 /**
- * Restores a {@link SQLiteOffsetContext} from Kafka Connect's persisted offset storage.
- *
- * <p>Called once on connector start. When {@code offset} is null or empty the connector has never
- * run before and a full snapshot should be performed. Otherwise, streaming resumes from the stored
- * {@code change_id}.
+ * Restores a {@link SQLiteOffsetContext} from Kafka Connect's persisted offset storage. A null or
+ * empty offset means the connector has never run and a full snapshot follows.
  */
 public class SQLiteOffsetLoader implements OffsetContext.Loader<SQLiteOffsetContext> {
 

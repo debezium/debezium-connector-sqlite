@@ -6,23 +6,17 @@
 package io.debezium.connector.sqlite;
 
 /**
- * The contract for the {@code _debezium_cdc_log} table.
- *
- * <p>This append-only table holds the change events the connector reads over plain JDBC. Each row
- * records one change: the source table, the operation, the row data before and after, and when it
- * was committed. The table name, column names, and DDL are defined here in one place so the writer
- * of the table and the reader of it agree on a single shape. This class is constants only and is
- * never instantiated.
+ * The contract for the {@code _debezium_cdc_log} table: an append-only table whose rows each record
+ * one change. The table name, column names, and DDL are defined here so the writer and reader agree
+ * on one shape. Constants only; never instantiated.
  */
 public final class CdcLog {
 
-    /** Name of the CDC log table. */
     public static final String TABLE_NAME = "_debezium_cdc_log";
 
-    /** Auto-incrementing primary key, the connector's log sequence number and offset value. */
+    /** Auto-incrementing primary key; the connector's offset value. */
     public static final String CHANGE_ID = "change_id";
 
-    /** Source table the change came from. */
     public static final String TABLE_NAME_COLUMN = "table_name";
 
     /** Operation code: {@code c} (create), {@code u} (update), or {@code d} (delete). */
@@ -37,19 +31,15 @@ public final class CdcLog {
     /** Commit time of the change in Unix epoch milliseconds. */
     public static final String COMMITTED_AT = "committed_at";
 
-    /** {@link #OPERATION} value for an insert. */
     public static final String OPERATION_CREATE = "c";
 
-    /** {@link #OPERATION} value for an update. */
     public static final String OPERATION_UPDATE = "u";
 
-    /** {@link #OPERATION} value for a delete. */
     public static final String OPERATION_DELETE = "d";
 
     /**
-     * The frozen {@code CREATE TABLE} statement. Built from the column constants above so the DDL
-     * and the names used to read the table can never drift apart. {@code IF NOT EXISTS} makes it
-     * safe to run on every startup.
+     * The frozen {@code CREATE TABLE} statement, built from the column constants so the DDL and the
+     * read names cannot drift. {@code IF NOT EXISTS} makes it safe to run on every startup.
      */
     public static final String CREATE_TABLE_DDL = String.format("""
             CREATE TABLE IF NOT EXISTS %s (

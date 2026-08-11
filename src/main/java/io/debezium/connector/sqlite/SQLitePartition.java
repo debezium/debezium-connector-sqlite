@@ -12,11 +12,8 @@ import io.debezium.pipeline.spi.Partition;
 import io.debezium.relational.AbstractPartition;
 
 /**
- * Identifies the offset partition for a SQLite connector instance.
- *
- * <p>Each connector instance writes its offsets under this partition key in Kafka Connect's
- * offset storage. Instances with different {@link SQLiteConnectorConfig#TOPIC_PREFIX} values
- * keep independent offsets.
+ * Identifies the offset partition for a SQLite connector instance. Instances with different
+ * {@link SQLiteConnectorConfig#TOPIC_PREFIX} values keep independent offsets.
  */
 public class SQLitePartition extends AbstractPartition {
 
@@ -34,9 +31,6 @@ public class SQLitePartition extends AbstractPartition {
         return Map.of(SERVER_KEY, serverName);
     }
 
-    /**
-     * Provides the set of partitions for a given connector configuration.
-     */
     public static class Provider implements Partition.Provider<SQLitePartition> {
 
         private final SQLiteConnectorConfig config;

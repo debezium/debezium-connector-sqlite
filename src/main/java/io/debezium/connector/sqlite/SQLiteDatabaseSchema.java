@@ -16,13 +16,9 @@ import io.debezium.relational.TableSchemaBuilder;
 import io.debezium.spi.topic.TopicNamingStrategy;
 
 /**
- * Maintains the Kafka Connect schemas (key, value, envelope) for each table tracked by the
- * SQLite connector.
- *
- * <p>Call {@link #buildAndRegisterSchema(io.debezium.relational.Table)} whenever a table's
- * structure becomes known (typically during snapshot or after a schema change). The
- * {@link io.debezium.pipeline.EventDispatcher} calls {@link #schemaFor(TableId)} to look up the
- * schema before dispatching each event.
+ * Maintains the Kafka Connect schemas (key, value, envelope) for each table the connector tracks. The
+ * {@link io.debezium.pipeline.EventDispatcher} calls {@link #schemaFor(TableId)} before dispatching
+ * each event.
  */
 public class SQLiteDatabaseSchema extends RelationalDatabaseSchema {
 
@@ -48,11 +44,7 @@ public class SQLiteDatabaseSchema extends RelationalDatabaseSchema {
 
     /**
      * Reads the current schema from the database and registers a Kafka Connect schema for every
-     * monitored table. It delegates to the inherited {@code readSchema}, which enumerates the user
-     * tables, reads their columns and primary keys through the SQLite JDBC driver, and applies the
-     * always-exclude and the table include/exclude filter. The connection's {@code overrideColumn}
-     * gives each column its affinity-correct JDBC type. Each surviving table is then built and
-     * registered, with the column include/exclude filter applied during the build.
+     * monitored table.
      *
      * @param connection an open connection to the database file
      * @throws SQLException if the schema cannot be read

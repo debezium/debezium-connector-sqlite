@@ -23,11 +23,8 @@ import io.debezium.relational.TableId;
 import io.debezium.relational.Tables.TableFilter;
 
 /**
- * Configuration for the SQLite connector.
- *
- * <p>Add connector-specific {@link Field} constants here. Each field must be documented and
- * registered with {@link #CONFIG_DEFINITION}, which derives both {@link #ALL_FIELDS} and
- * {@link #configDef()} so the field set cannot drift between them.
+ * Configuration for the SQLite connector. Fields are registered with {@link #CONFIG_DEFINITION},
+ * which derives both {@link #ALL_FIELDS} and {@link #configDef()} so the field set cannot drift.
  */
 public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
 
@@ -103,11 +100,9 @@ public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
     public static final int DEFAULT_CDC_LOG_BATCH_SIZE = 1000;
 
     /**
-     * Maximum number of rows to read from {@code _debezium_cdc_log} per streaming poll. This is the
-     * {@code LIMIT} on the CDC-log read, kept small so each read transaction stays short and SQLite
-     * can checkpoint the WAL between polls. It is separate from the inherited {@code max.batch.size},
-     * which bounds how many records the change-event queue hands to Kafka Connect per poll; the two
-     * are decoupled by the queue buffer.
+     * Maximum rows read from {@code _debezium_cdc_log} per streaming poll, kept small so each read
+     * transaction stays short and SQLite can checkpoint the WAL between polls. Separate from the
+     * inherited {@code max.batch.size}, which the queue buffer decouples.
      */
     public static final Field CDC_LOG_BATCH_SIZE = Field.create("cdc.log.batch.size")
             .withDisplayName("CDC log batch size")
@@ -118,14 +113,7 @@ public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
             .withDescription("Maximum number of rows to read from the CDC log table per poll. "
                     + "Defaults to " + DEFAULT_CDC_LOG_BATCH_SIZE + ".");
 
-    /**
-     * Whether to substitute a type placeholder when a row's stored value does not match its column's
-     * SQLite affinity and cannot be represented in the column's schema type. This only affects a
-     * non-nullable column with no default, which has no null to fall back on: without it such a value
-     * fails to convert, with it the connector emits a placeholder (0 for INTEGER, 0.0 for REAL and
-     * NUMERIC, an empty string for TEXT, and empty bytes for BLOB). Nullable columns and columns with a
-     * default are unaffected; they already resolve to null or their default.
-     */
+    /** Whether to substitute a type placeholder for an affinity-mismatched value in a non-nullable, no-default column. */
     public static final Field NONNULL_AFFINITY_MISMATCH_FALLBACK = Field.create("nonnull.affinity.mismatch.fallback")
             .withDisplayName("Substitute a placeholder for a non-nullable affinity mismatch")
             .withType(ConfigDef.Type.BOOLEAN)
@@ -184,10 +172,8 @@ public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
     }
 
     /**
-     * Whether to substitute a type placeholder for an affinity-mismatched value in a non-nullable,
-     * no-default column. The opt-in only takes effect under the {@code warn} and {@code skip} failure
-     * modes, which are the modes that would otherwise leave such a value to fail at serialization. Under
-     * {@code fail} the connector is meant to stop, so no placeholder is substituted.
+     * Whether to substitute the placeholder. It takes effect only under the {@code warn} and
+     * {@code skip} failure modes, since {@code fail} is meant to stop the connector.
      */
     public boolean shouldSubstituteNonNullPlaceholder() {
         return nonNullAffinityMismatchFallbackEnabled

@@ -19,11 +19,8 @@ import io.debezium.pipeline.txmetadata.TransactionContext;
 import io.debezium.spi.schema.DataCollectionId;
 
 /**
- * Tracks the current read position within the SQLite CDC log.
- *
- * <p>The offset map returned by {@link #getOffset()} is persisted by the Kafka Connect
- * framework and used to resume after a restart. The position is the last {@code change_id}
- * value consumed from the {@code _debezium_cdc_log} table.
+ * Tracks the read position in the SQLite CDC log as the last {@code change_id} consumed. The map from
+ * {@link #getOffset()} is persisted by Kafka Connect and used to resume after a restart.
  */
 public class SQLiteOffsetContext extends CommonOffsetContext<SQLiteSourceInfo> {
 
@@ -35,15 +32,7 @@ public class SQLiteOffsetContext extends CommonOffsetContext<SQLiteSourceInfo> {
         super(sourceInfo);
     }
 
-    /**
-     * Restores an offset context from persisted state, including the snapshot markers, so a restart
-     * resumes in the same phase it stopped in.
-     *
-     * @param sourceInfo the source info for this connector
-     * @param changeId the last {@code change_id} consumed before the restart
-     * @param snapshot the snapshot type in progress at the restart, or null if none was
-     * @param snapshotCompleted whether an initial or blocking snapshot had completed
-     */
+    /** Restores an offset from persisted state, including the snapshot markers, so a restart resumes in the same phase. */
     public SQLiteOffsetContext(SQLiteSourceInfo sourceInfo, long changeId, SnapshotType snapshot, boolean snapshotCompleted) {
         super(sourceInfo, snapshotCompleted);
         this.changeId = changeId;
@@ -56,23 +45,15 @@ public class SQLiteOffsetContext extends CommonOffsetContext<SQLiteSourceInfo> {
         }
     }
 
-    /**
-     * Creates the offset context for a connector that has never run, positioned before the first
-     * {@code change_id}.
-     *
-     * @param config the connector configuration, used to build the source info
-     * @return a fresh offset context at {@code change_id} 0
-     */
+    /** A fresh offset for a connector that has never run, positioned at {@code change_id} 0. */
     public static SQLiteOffsetContext initial(SQLiteConnectorConfig config) {
         return new SQLiteOffsetContext(new SQLiteSourceInfo(config));
     }
 
-    /** Returns the last {@code change_id} consumed from {@code _debezium_cdc_log}. */
     public long getChangeId() {
         return changeId;
     }
 
-    /** Advances the position to the given {@code change_id}. */
     public void setChangeId(long changeId) {
         this.changeId = changeId;
     }

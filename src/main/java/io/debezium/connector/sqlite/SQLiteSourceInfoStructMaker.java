@@ -12,11 +12,8 @@ import io.debezium.config.CommonConnectorConfig;
 import io.debezium.connector.AbstractSourceInfoStructMaker;
 
 /**
- * Builds the Kafka Connect schema and struct for the {@code source} field
- * embedded in every change event envelope.
- *
- * <p>Add connector-specific fields to {@link #init} and populate them in {@link #struct}.
- * Any field added here must also be stored in {@link SQLiteSourceInfo}.
+ * Builds the Kafka Connect schema and struct for the {@code source} field of every change event.
+ * Fields added here must also be stored in {@link SQLiteSourceInfo}.
  */
 class SQLiteSourceInfoStructMaker extends AbstractSourceInfoStructMaker<SQLiteSourceInfo> {
 
