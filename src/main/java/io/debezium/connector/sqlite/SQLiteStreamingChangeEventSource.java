@@ -6,11 +6,14 @@
 package io.debezium.connector.sqlite;
 
 import java.sql.SQLException;
+import java.util.Optional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.debezium.DebeziumException;
+import io.debezium.pipeline.monitor.OffsetActivityMonitor;
+import io.debezium.pipeline.monitor.OffsetActivityMonitorService;
 import io.debezium.pipeline.source.spi.ChangeEventSource.ChangeEventSourceContext;
 import io.debezium.pipeline.source.spi.StreamingChangeEventSource;
 
@@ -29,6 +32,8 @@ class SQLiteStreamingChangeEventSource
     private final SQLiteConnectorConfig config;
     private final SQLiteConnection connection;
     private final SQLiteDatabaseSchema schema;
+    private final OffsetActivityMonitorService offsetActivityMonitorService;
+    private OffsetActivityMonitor<SQLitePartition, SQLiteOffsetContext> offsetActivityMonitor;
 
     private SQLiteOffsetContext effectiveOffset;
 
@@ -36,6 +41,7 @@ class SQLiteStreamingChangeEventSource
         this.config = config;
         this.connection = connection;
         this.schema = schema;
+        this.offsetActivityMonitorService = OffsetActivityMonitorService.lookup(config.getServiceRegistry());
     }
 
     /**
@@ -71,6 +77,8 @@ class SQLiteStreamingChangeEventSource
 
         while (context.isRunning()) {
             Thread.sleep(IDLE_SLEEP_MS);
+
+            offsetActivityMonitorService.pulse(partition, offsetContext);
         }
 
         LOGGER.info("SQLite streaming stopped");
@@ -79,5 +87,13 @@ class SQLiteStreamingChangeEventSource
     @Override
     public SQLiteOffsetContext getOffsetContext() {
         return effectiveOffset;
+    }
+
+    @Override
+    public Optional<OffsetActivityMonitor<SQLitePartition, SQLiteOffsetContext>> getOffsetActivityMonitor() {
+        if (offsetActivityMonitor == null) {
+            offsetActivityMonitor = new SQLiteOffsetActivityMonitor(config.getOffsetActivityMonitorInterval());
+        }
+        return Optional.of(offsetActivityMonitor);
     }
 }
