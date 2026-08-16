@@ -104,13 +104,9 @@ public class SQLiteConnectorTask extends BaseSourceTask<SQLitePartition, SQLiteO
         connection.createCdcLogTable();
         connection.verifyMinimumVersion();
 
+        // The schema starts empty; the snapshot source loads it in readTableStructure and the
+        // streaming source reloads it in init, so the snapshot-skipped path also has a schema.
         this.schema = new SQLiteDatabaseSchema(taskContext, topicNamingStrategy);
-        try {
-            this.schema.refresh(connection);
-        }
-        catch (SQLException e) {
-            throw new DebeziumException("Failed to load the SQLite schema from " + databaseFilePath, e);
-        }
 
         final Offsets<SQLitePartition, SQLiteOffsetContext> previousOffsets = getPreviousOffsets(
                 new SQLitePartition.Provider(connectorConfig),

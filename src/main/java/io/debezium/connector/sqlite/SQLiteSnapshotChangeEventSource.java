@@ -52,10 +52,11 @@ class SQLiteSnapshotChangeEventSource extends RelationalSnapshotChangeEventSourc
     }
 
     @Override
-    protected Set<TableId> getAllTableIds(RelationalSnapshotContext<SQLitePartition, SQLiteOffsetContext> snapshotContext) {
-        // The schema already holds the monitored tables, read and filtered at task startup. Returning
-        // them here avoids a database read so the high-water mark stays the first read of the view.
-        return schema.tableIds();
+    protected Set<TableId> getAllTableIds(RelationalSnapshotContext<SQLitePartition, SQLiteOffsetContext> snapshotContext)
+            throws SQLException {
+        // The base filters this through the system-tables predicate, dropping sqlite_* and the
+        // connector's own _debezium_ tables. SQLite has no catalog, so the catalog name is null.
+        return jdbcConnection.getAllTableIds(null);
     }
 
     @Override
@@ -70,7 +71,9 @@ class SQLiteSnapshotChangeEventSource extends RelationalSnapshotChangeEventSourc
                                            SQLiteOffsetContext previousOffset)
             throws SQLException {
         SQLiteOffsetContext offset = previousOffset != null ? previousOffset : SQLiteOffsetContext.initial(connectorConfig);
-        // The first read of the transaction; it opens the consistent view and fixes the resume point.
+        // Reads the high-water mark inside the snapshot connection's frozen WAL view. Every snapshot
+        // read shares that one view, so the mark and the data are consistent and any change logged
+        // after it is left for streaming with no gap or duplicate.
         offset.setChangeId(jdbcConnection.readMaxChangeId());
         snapshotContext.offset = offset;
     }
@@ -84,6 +87,8 @@ class SQLiteSnapshotChangeEventSource extends RelationalSnapshotChangeEventSourc
         // The data collection filter keeps the system tables out.
         jdbcConnection.readSchema(snapshotContext.tables, snapshotContext.catalogName, null,
                 connectorConfig.getTableFilters().dataCollectionFilter(), null, false);
+        // Load the same tables into the connector schema so the dispatcher can build Kafka schemas.
+        schema.refresh(jdbcConnection);
     }
 
     @Override
