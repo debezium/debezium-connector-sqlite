@@ -5,9 +5,12 @@
  */
 package io.debezium.connector.sqlite;
 
+import java.sql.SQLException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.debezium.DebeziumException;
 import io.debezium.pipeline.source.spi.ChangeEventSource.ChangeEventSourceContext;
 import io.debezium.pipeline.source.spi.StreamingChangeEventSource;
 
@@ -21,9 +24,24 @@ class SQLiteStreamingChangeEventSource
     private static final Logger LOGGER = LoggerFactory.getLogger(SQLiteStreamingChangeEventSource.class);
 
     private final SQLiteConnectorConfig config;
+    private final SQLiteConnection connection;
+    private final SQLiteDatabaseSchema schema;
 
-    SQLiteStreamingChangeEventSource(SQLiteConnectorConfig config) {
+    SQLiteStreamingChangeEventSource(SQLiteConnectorConfig config, SQLiteConnection connection, SQLiteDatabaseSchema schema) {
         this.config = config;
+        this.connection = connection;
+        this.schema = schema;
+    }
+
+    @Override
+    public void init(SQLiteOffsetContext offsetContext) {
+        // Load the schema for the case where the snapshot was skipped and did not load it.
+        try {
+            schema.refresh(connection);
+        }
+        catch (SQLException e) {
+            throw new DebeziumException("Failed to load the SQLite schema", e);
+        }
     }
 
     @Override
