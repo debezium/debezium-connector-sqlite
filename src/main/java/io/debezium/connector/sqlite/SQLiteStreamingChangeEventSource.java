@@ -55,6 +55,13 @@ class SQLiteStreamingChangeEventSource
     // backlogged row is still rendered against the shape that captured it rather than the newer one.
     private final List<PendingSwap> pendingSwaps = new ArrayList<>();
 
+    /**
+     * The {@code change_id} Kafka Connect has most recently confirmed committed, read by
+     * {@link #commitOffset} on the commit thread and read by the poll loop on the streaming thread; 0
+     * until the first commit lands.
+     */
+    private volatile long committedChangeId;
+
     SQLiteStreamingChangeEventSource(SQLiteConnectorConfig config,
                                      SQLiteConnection connection,
                                      SQLiteDatabaseSchema schema,
@@ -285,6 +292,17 @@ class SQLiteStreamingChangeEventSource
             offsetActivityMonitor = new SQLiteOffsetActivityMonitor(config.getOffsetActivityMonitorInterval());
         }
         return Optional.of(offsetActivityMonitor);
+    }
+
+    /**
+     * Records the {@code change_id} Kafka Connect has durably committed, so the poll loop knows how far
+     * it may compact the log. Called on the commit thread, a different thread from the one running
+     * {@link #execute}, so this does no database work of its own; it only stores a volatile field for
+     * the poll loop to read.
+     */
+    @Override
+    public void commitOffset(Map<String, ?> partition, Map<String, ?> offset) {
+        committedChangeId = ((Number) offset.get(SQLiteOffsetContext.CHANGE_ID_KEY)).longValue();
     }
 
     /** A schema change held until streaming passes {@code boundary}. A null {@code newShape} drops the table. */
