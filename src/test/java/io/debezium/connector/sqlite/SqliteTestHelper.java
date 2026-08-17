@@ -81,15 +81,7 @@ public final class SqliteTestHelper implements AutoCloseable {
         return databaseFile;
     }
 
-    /**
-     * Installs CDC triggers on a source table so its changes are captured into
-     * {@code _debezium_cdc_log}. The table's columns are read from {@code PRAGMA table_info}, and the
-     * insert, update, and delete triggers built from them are run against the database. The table
-     * must already exist.
-     *
-     * @param table the source table to capture changes from
-     * @throws SQLException if the columns cannot be read or the triggers cannot be created
-     */
+    /** Installs the CDC capture triggers on a source table, which must already exist. */
     public void installTriggers(String table) throws SQLException {
         TriggerInstaller.install(connection, table);
     }

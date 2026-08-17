@@ -11,24 +11,17 @@ import java.util.stream.Collectors;
 
 /**
  * Builds the SQLite triggers that capture changes into {@link CdcLog#TABLE_NAME _debezium_cdc_log}.
- *
- * <p>Given a source table and its columns, {@link #createTriggers(String, List)} returns the
- * {@code AFTER INSERT}, {@code AFTER UPDATE}, and {@code AFTER DELETE} trigger statements that write
- * one correctly shaped row into {@code _debezium_cdc_log} for every change to the table. The row data
- * is captured with SQLite's {@code json_object()} over the {@code NEW} and {@code OLD} row aliases, so
- * an insert records the new row, a delete records the old row, and an update records both.
- *
- * <p>This class only builds the SQL. Installing the triggers against a database is the caller's job.
+ * {@link #createTriggers(String, List)} returns the {@code AFTER INSERT}, {@code AFTER UPDATE}, and
+ * {@code AFTER DELETE} statements that write one row per change, using {@code json_object()} over the
+ * {@code NEW} and {@code OLD} aliases. This class only builds the SQL; installing it is the caller's job.
  */
 public final class TriggerGenerator {
 
-    /** Prefix for generated trigger names, kept distinct so the triggers are easy to recognize. */
     private static final String TRIGGER_PREFIX = "_debezium_cdc_";
 
     /**
-     * Columns per {@code json_object} call for a wide table. {@code json_object} accepts at most 127
-     * arguments, which is 63 columns (two arguments each), so a row past that is serialized in chunks
-     * and merged. This is set conservatively below 63 to leave headroom.
+     * Columns per {@code json_object} call. It accepts at most 127 arguments, so 63 columns; a wider
+     * row is serialized in chunks and merged. Set below 63 to leave headroom.
      */
     private static final int MAX_COLUMNS_PER_CHUNK = 50;
 
@@ -45,13 +38,7 @@ public final class TriggerGenerator {
     private TriggerGenerator() {
     }
 
-    /**
-     * Builds the insert, update, and delete triggers for one source table.
-     *
-     * @param tableName the source table the triggers watch
-     * @param columns the source table's column names, captured into the JSON row data
-     * @return the three {@code CREATE TRIGGER} statements, in insert, update, delete order
-     */
+    /** Builds the insert, update, and delete triggers for one source table, in that order. */
     public static List<String> createTriggers(String tableName, List<String> columns) {
         String newRow = rowJson("NEW", columns);
         String oldRow = rowJson("OLD", columns);
@@ -61,7 +48,6 @@ public final class TriggerGenerator {
                 trigger(tableName, "delete", "DELETE", CdcLog.OPERATION_DELETE, oldRow, "NULL"));
     }
 
-    /** Builds one {@code CREATE TRIGGER} statement for the given operation. */
     private static String trigger(String tableName, String suffix, String timing,
                                   String operation, String oldData, String newData) {
         return String.format("""
@@ -84,9 +70,8 @@ public final class TriggerGenerator {
     }
 
     /**
-     * The row's JSON over the given alias. A narrow row is one {@code json_object} call. A row with
-     * more columns than one call can hold is serialized in chunks and merged with {@code json_set},
-     * which keeps null columns rather than dropping them the way {@code json_patch} would.
+     * The row's JSON over the given alias. A row wider than one {@code json_object} call is merged with
+     * {@code json_set}, which keeps null columns rather than dropping them the way {@code json_patch} would.
      */
     private static String rowJson(String rowAlias, List<String> columns) {
         List<List<String>> chunks = partition(columns, MAX_COLUMNS_PER_CHUNK);
@@ -97,7 +82,6 @@ public final class TriggerGenerator {
         return json;
     }
 
-    /** Builds a {@code json_object('col', <value>, ...)} call for one chunk of columns. */
     private static String jsonObject(String rowAlias, List<String> columns) {
         String pairs = columns.stream()
                 .map(column -> sqlString(column) + ", " + columnValue(rowAlias, column))
@@ -106,10 +90,8 @@ public final class TriggerGenerator {
     }
 
     /**
-     * Merges one chunk of columns onto an existing JSON expression with {@code json_set}. A null value
-     * is set as JSON null and kept, so no column is lost from a wide row. The nested {@code json_object}
-     * a blob column produces embeds as real JSON, not as a string, so a blob captured through this path
-     * stays the tagged object.
+     * Merges a chunk onto the JSON with {@code json_set}, which keeps null columns rather than dropping
+     * them. A blob column's nested {@code json_object} embeds as real JSON, so it stays the tagged object.
      */
     private static String jsonSet(String json, String rowAlias, List<String> columns) {
         String assignments = columns.stream()
@@ -119,10 +101,9 @@ public final class TriggerGenerator {
     }
 
     /**
-     * The captured value expression for one column. A blob is hex-encoded into a tagged nested object
-     * so {@code json_object} can hold it, which it otherwise cannot; every other storage class stays a
-     * bare value. The {@code typeof} test runs per row, so a blob is caught in any column whatever its
-     * declared affinity.
+     * The captured value for one column. A blob is hex-encoded into a tagged nested object, which
+     * {@code json_object} can otherwise not hold; every other storage class stays a bare value. The
+     * {@code typeof} test runs per row, so a blob is caught whatever the column's declared affinity.
      */
     private static String columnValue(String rowAlias, String column) {
         String ref = columnRef(rowAlias, column);
@@ -141,16 +122,14 @@ public final class TriggerGenerator {
     }
 
     /**
-     * A {@code json_set} path literal {@code '$."col"'} that addresses one column by name. The name is
-     * escaped for the JSON path (backslash and double quote), then the whole path is escaped for the
-     * SQL string literal (single quote), so an awkward column name still addresses the right key.
+     * A {@code json_set} path literal {@code '$."col"'} for one column. The name is escaped for the JSON
+     * path (backslash and double quote), then the path is escaped for the SQL string literal (single quote).
      */
     private static String jsonPath(String column) {
         String key = column.replace("\\", "\\\\").replace("\"", "\\\"");
         return sqlString("$.\"" + key + "\"");
     }
 
-    /** Splits the columns into groups of at most {@code size}, preserving order. */
     private static List<List<String>> partition(List<String> columns, int size) {
         List<List<String>> chunks = new ArrayList<>();
         for (int i = 0; i < columns.size(); i += size) {

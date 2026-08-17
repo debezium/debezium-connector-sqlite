@@ -109,11 +109,9 @@ public class SQLiteConnectorTask extends BaseSourceTask<SQLitePartition, SQLiteO
         // streaming source reloads it in init, so the snapshot-skipped path also has a schema.
         this.schema = new SQLiteDatabaseSchema(taskContext, topicNamingStrategy);
 
-        // Install the capture triggers on every monitored table before the coordinator starts, so any
-        // write from this point on is logged with a change_id and the snapshot-to-streaming handoff stays
-        // consistent. Installation is idempotent (CREATE TRIGGER IF NOT EXISTS), so a restart is a no-op.
-        // The table list comes straight from the database, not the connector schema, which the snapshot
-        // and streaming sources load on their own paths.
+        // Install the capture triggers before the coordinator starts, so every write from now on is
+        // logged and the snapshot-to-streaming handoff has no gap. Installation is idempotent. The table
+        // list comes from the database, not the connector schema, which the sources load on their own.
         final TableFilter tableFilter = connectorConfig.getTableFilters().dataCollectionFilter();
         try {
             for (TableId tableId : connection.getAllTableIds(null)) {

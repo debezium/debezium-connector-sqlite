@@ -21,10 +21,8 @@ import io.debezium.embedded.async.AbstractAsyncEngineConnectorTest;
 import io.debezium.jdbc.JdbcConnection;
 
 /**
- * Integration test for trigger installation at startup. The connector installs the capture triggers
- * itself when it starts, so a plain SQL insert, update, and delete on a monitored table each land the
- * matching {@code c}, {@code u}, and {@code d} row in {@code _debezium_cdc_log}, in ascending
- * {@code change_id} order. No trigger is installed by the test; the connector does it.
+ * Proves the connector installs the capture triggers itself at startup: a plain insert, update, and
+ * delete each land the matching {@code c}, {@code u}, {@code d} row in {@code _debezium_cdc_log}.
  */
 public class TriggerInstallationIT extends AbstractAsyncEngineConnectorTest {
 
@@ -58,8 +56,7 @@ public class TriggerInstallationIT extends AbstractAsyncEngineConnectorTest {
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
 
-        // The connector installed the triggers during startup, so these writes are captured without the
-        // test installing anything itself.
+        // The test installs no triggers; the connector did it at startup.
         JdbcConnection db = database.connection();
         db.execute("INSERT INTO customers (id, name) VALUES (1, 'Alice')");
         db.execute("UPDATE customers SET name = 'Alicia' WHERE id = 1");
@@ -87,11 +84,9 @@ public class TriggerInstallationIT extends AbstractAsyncEngineConnectorTest {
         assertThat(delete.newRow).isNull();
     }
 
-    /** One row of {@code _debezium_cdc_log}, in change order. */
     private record CdcRow(String table, String operation, String oldRow, String newRow) {
     }
 
-    /** Reads every CDC log row, ordered by {@code change_id}. */
     private static List<CdcRow> readCdcLog(JdbcConnection db) throws SQLException {
         String query = "SELECT " + CdcLog.TABLE_NAME_COLUMN + ", " + CdcLog.OPERATION + ", "
                 + CdcLog.OLD_ROW_DATA + ", " + CdcLog.NEW_ROW_DATA

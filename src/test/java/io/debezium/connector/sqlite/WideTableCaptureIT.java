@@ -16,12 +16,9 @@ import org.junit.jupiter.api.Test;
 import io.debezium.jdbc.JdbcConnection;
 
 /**
- * Proves a wide table is captured correctly. With more columns than one {@code json_object} call can
- * hold, the trigger serializes the row in chunks and merges them with {@code json_set}. This test
- * builds a 70 column table, so more than one chunk is needed, and checks that every column survives:
- * nulls in both the first and a later chunk are preserved, a blob in a later chunk stays tagged, and a
- * column whose name carries a double quote is addressed correctly. It reads the JSON the trigger writes
- * directly, with no streaming or decode code. It uses a real temp database, so it runs under Failsafe.
+ * Proves a wide table (70 columns, past one {@code json_object} call) is captured across chunks with
+ * every column kept: nulls in the first and a later chunk, a blob in a later chunk, and a column name
+ * carrying a double quote.
  */
 public class WideTableCaptureIT {
 
@@ -43,15 +40,11 @@ public class WideTableCaptureIT {
 
             String newRow = readNewRowData(db);
 
-            // A null is kept in the first chunk (json_object) and in a later chunk (json_set), rather
-            // than being dropped by the merge.
+            // A null survives the json_set merge in both the first and a later chunk.
             assertThat(newRow).contains("\"c" + NULL_IN_FIRST_CHUNK + "\":null");
             assertThat(newRow).contains("\"c" + NULL_IN_LATER_CHUNK + "\":null");
-            // A blob in a later chunk stays the tagged hex object through the json_set merge.
             assertThat(newRow).contains("\"c" + BLOB_INDEX + "\":{\"" + CdcLog.BLOB_HEX_MARKER + "\":\"AB\"}");
-            // A column name carrying a double quote is addressed correctly by the json_set path.
             assertThat(newRow).contains("\"zzq\\\"col\":\"ok\"");
-            // The last column is present, so nothing was lost off the end of the row.
             assertThat(newRow).contains("\"c" + (COLUMN_COUNT - 1) + "\":\"v" + (COLUMN_COUNT - 1) + "\"");
         }
     }
@@ -60,7 +53,6 @@ public class WideTableCaptureIT {
         return index == AWKWARD_INDEX ? AWKWARD_NAME : "c" + index;
     }
 
-    /** A quoted SQL identifier, with any embedded double quote doubled. */
     private static String quoted(String name) {
         return "\"" + name.replace("\"", "\"\"") + "\"";
     }
@@ -101,7 +93,6 @@ public class WideTableCaptureIT {
         return "'v" + index + "'";
     }
 
-    /** Reads the single {@code new_row_data} JSON value. */
     private static String readNewRowData(JdbcConnection db) throws SQLException {
         String query = "SELECT " + CdcLog.NEW_ROW_DATA + " FROM " + CdcLog.TABLE_NAME;
         return db.queryAndMap(query, rs -> {
