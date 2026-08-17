@@ -55,6 +55,9 @@ class SQLiteStreamingChangeEventSource
      */
     private volatile long committedChangeId;
 
+    /** The {@code change_id} the log was last compacted up to; 0 until the first compaction. */
+    private long lastCompactedChangeId;
+
     SQLiteStreamingChangeEventSource(SQLiteConnectorConfig config,
                                      SQLiteConnection connection,
                                      SQLiteDatabaseSchema schema,
@@ -105,6 +108,7 @@ class SQLiteStreamingChangeEventSource
 
         while (context.isRunning()) {
             reconcileIfSchemaChanged();
+            compactIfNeeded();
             List<CdcLogRow> batch = readBatch();
             if (batch.isEmpty()) {
                 metronome.pause();
@@ -163,6 +167,25 @@ class SQLiteStreamingChangeEventSource
         catch (SQLException e) {
             throw new DebeziumException("Failed to switch the streaming connection to autocommit", e);
         }
+    }
+
+    /**
+     * Deletes already-committed rows once enough of them have accumulated since the last delete. The
+     * bound is {@link #committedChangeId}, never the offset the poll loop is dispatching, so a row that
+     * has only been dispatched and not yet offset-committed is never deleted.
+     */
+    private void compactIfNeeded() {
+        long committed = committedChangeId;
+        if (committed - lastCompactedChangeId < config.getLogCompactionThreshold()) {
+            return;
+        }
+        try {
+            connection.deleteChangesUpTo(committed);
+        }
+        catch (SQLException e) {
+            throw new DebeziumException("Failed to compact " + CdcLog.TABLE_NAME, e);
+        }
+        lastCompactedChangeId = committed;
     }
 
     private List<CdcLogRow> readBatch() {
