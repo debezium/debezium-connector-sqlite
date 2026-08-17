@@ -8,6 +8,7 @@ package io.debezium.connector.sqlite;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.slf4j.Logger;
@@ -46,6 +47,13 @@ class SQLiteStreamingChangeEventSource
 
     /** The {@code schema_version} seen at the last reconcile; null until the first poll seeds it. */
     private Long lastSchemaVersion;
+
+    /**
+     * The {@code change_id} Kafka Connect has most recently confirmed committed, read by
+     * {@link #commitOffset} on the commit thread and read by the poll loop on the streaming thread; 0
+     * until the first commit lands.
+     */
+    private volatile long committedChangeId;
 
     SQLiteStreamingChangeEventSource(SQLiteConnectorConfig config,
                                      SQLiteConnection connection,
@@ -211,5 +219,16 @@ class SQLiteStreamingChangeEventSource
     @Override
     public SQLiteOffsetContext getOffsetContext() {
         return effectiveOffset;
+    }
+
+    /**
+     * Records the {@code change_id} Kafka Connect has durably committed, so the poll loop knows how far
+     * it may compact the log. Called on the commit thread, a different thread from the one running
+     * {@link #execute}, so this does no database work of its own; it only stores a volatile field for
+     * the poll loop to read.
+     */
+    @Override
+    public void commitOffset(Map<String, ?> partition, Map<String, ?> offset) {
+        committedChangeId = ((Number) offset.get(SQLiteOffsetContext.CHANGE_ID_KEY)).longValue();
     }
 }
