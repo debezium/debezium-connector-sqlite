@@ -110,6 +110,19 @@ public class SQLiteConnection extends JdbcConnection {
     }
 
     /**
+     * Deletes every {@code _debezium_cdc_log} row at or below the given {@code change_id}. Callers must
+     * pass a {@code change_id} that Kafka Connect has durably committed, never one merely dispatched, so
+     * a crash before the commit never loses a row this deletes.
+     *
+     * @param changeId the inclusive upper bound; rows with this id or smaller are removed
+     * @throws SQLException if the delete cannot be run
+     */
+    public void deleteChangesUpTo(long changeId) throws SQLException {
+        String sql = String.format("DELETE FROM %s WHERE %s <= ?", CdcLog.TABLE_NAME, CdcLog.CHANGE_ID);
+        prepareUpdate(sql, statement -> statement.setLong(1, changeId));
+    }
+
+    /**
      * Returns the database's {@code schema_version}, the header counter SQLite bumps on every DDL
      * statement. Streaming re-reads the schema when it rises, the only cross-connection signal that the
      * schema changed. It moves for any DDL, so a change is a prompt to look, not proof a monitored table
