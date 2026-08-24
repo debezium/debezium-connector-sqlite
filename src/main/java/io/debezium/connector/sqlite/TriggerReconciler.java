@@ -44,10 +44,15 @@ public final class TriggerReconciler {
      *
      * @param connection an open connection to the SQLite database
      * @param schema the connector's schema, refreshed to the current state
+     * @param previouslyMonitoredTables the table names monitored before this reconcile, so a table gone
+     *        from the schema can be reported dropped even when it left no orphaned trigger behind, as a
+     *        plain {@code DROP TABLE} does not (SQLite drops its triggers along with it)
      * @return the tables that were created, altered, or dropped; empty lists when nothing changed
      * @throws SQLException if the triggers cannot be read or rebuilt
      */
-    public static ReconcileResult reconcile(SQLiteConnection connection, SQLiteDatabaseSchema schema) throws SQLException {
+    public static ReconcileResult reconcile(SQLiteConnection connection, SQLiteDatabaseSchema schema,
+                                            Set<String> previouslyMonitoredTables)
+            throws SQLException {
         Map<String, String> installed = connection.readConnectorTriggerSql();
         Set<String> monitoredTables = new LinkedHashSet<>();
         List<String> created = new ArrayList<>();
@@ -65,13 +70,14 @@ public final class TriggerReconciler {
                 LOGGER.info("Rebuilt the capture triggers for table '{}' after a schema change", table);
             }
         }
-        List<String> dropped = new ArrayList<>();
         for (String orphan : orphanedTriggers(installed.keySet(), monitoredTables)) {
             connection.execute("DROP TRIGGER IF EXISTS " + orphan);
             LOGGER.info("Dropped orphaned capture trigger '{}' left by a table that is no longer monitored", orphan);
-            TriggerGenerator.tableNameFor(orphan).ifPresent(dropped::add);
         }
-        return new ReconcileResult(created, altered, dropped.stream().distinct().collect(Collectors.toList()));
+        List<String> dropped = previouslyMonitoredTables.stream()
+                .filter(table -> !monitoredTables.contains(table))
+                .collect(Collectors.toList());
+        return new ReconcileResult(created, altered, dropped);
     }
 
     /**

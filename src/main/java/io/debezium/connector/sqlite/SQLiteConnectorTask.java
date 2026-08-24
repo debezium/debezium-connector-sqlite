@@ -9,6 +9,7 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.apache.kafka.connect.source.SourceRecord;
@@ -121,7 +122,7 @@ public class SQLiteConnectorTask extends BaseSourceTask<SQLitePartition, SQLiteO
         // the connector was down it rebuilds them, so a trigger left stale by a schema change never leaves
         // the table unwritable once the connector is back up.
         try {
-            TriggerReconciler.reconcile(connection, schema);
+            TriggerReconciler.reconcile(connection, schema, Set.of());
         }
         catch (SQLException e) {
             throw new DebeziumException("Failed to reconcile the CDC capture triggers on the SQLite database at " + databaseFilePath, e);

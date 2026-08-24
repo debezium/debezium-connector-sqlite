@@ -9,6 +9,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
@@ -29,7 +30,7 @@ public class TriggerReconcilerIT {
         try (SqliteTestHelper db = SqliteTestHelper.create()) {
             db.connection().execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, total REAL)");
 
-            ReconcileResult result = reconcile(db);
+            ReconcileResult result = reconcile(db, Set.of());
 
             assertThat(result.created()).containsExactly("orders");
             assertThat(result.altered()).isEmpty();
@@ -44,7 +45,7 @@ public class TriggerReconcilerIT {
             db.installTriggers("orders");
             db.connection().execute("ALTER TABLE orders ADD COLUMN note TEXT");
 
-            ReconcileResult result = reconcile(db);
+            ReconcileResult result = reconcile(db, Set.of("orders"));
 
             assertThat(result.altered()).containsExactly("orders");
             assertThat(result.created()).isEmpty();
@@ -53,15 +54,32 @@ public class TriggerReconcilerIT {
     }
 
     @Test
-    void reportsARenamedAwayTableAsDropped() throws Exception {
-        // A plain DROP TABLE takes its triggers with it, so the only way a table's triggers outlive it
-        // is a RENAME TO: the old name's triggers stay attached to the renamed table.
+    void reportsADroppedTableAsDroppedEvenWithNoOrphanedTriggersLeftBehind() throws Exception {
+        // A plain DROP TABLE takes its triggers with it, so there is no orphaned trigger to notice; the
+        // table's absence from the previously-monitored set is the only signal.
+        try (SqliteTestHelper db = SqliteTestHelper.create()) {
+            db.connection().execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, total REAL)");
+            db.installTriggers("orders");
+            db.connection().execute("DROP TABLE orders");
+
+            ReconcileResult result = reconcile(db, Set.of("orders"));
+
+            assertThat(result.dropped()).containsExactly("orders");
+            assertThat(result.created()).isEmpty();
+            assertThat(result.altered()).isEmpty();
+        }
+    }
+
+    @Test
+    void reportsARenamedAwayTableAsDroppedAndTheNewNameAsCreated() throws Exception {
+        // RENAME TO leaves the old name's triggers attached to the renamed table, an orphan the
+        // reconciler drops separately; the new name is a fresh table as far as reconcile is concerned.
         try (SqliteTestHelper db = SqliteTestHelper.create()) {
             db.connection().execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, total REAL)");
             db.installTriggers("orders");
             db.connection().execute("ALTER TABLE orders RENAME TO sales_orders");
 
-            ReconcileResult result = reconcile(db);
+            ReconcileResult result = reconcile(db, Set.of("orders"));
 
             assertThat(result.dropped()).containsExactly("orders");
             assertThat(result.created()).containsExactly("sales_orders");
@@ -75,7 +93,7 @@ public class TriggerReconcilerIT {
             db.connection().execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, total REAL)");
             db.installTriggers("orders");
 
-            ReconcileResult result = reconcile(db);
+            ReconcileResult result = reconcile(db, Set.of("orders"));
 
             assertThat(result.created()).isEmpty();
             assertThat(result.altered()).isEmpty();
@@ -83,7 +101,7 @@ public class TriggerReconcilerIT {
         }
     }
 
-    private ReconcileResult reconcile(SqliteTestHelper db) throws Exception {
+    private ReconcileResult reconcile(SqliteTestHelper db, Set<String> previouslyMonitoredTables) throws Exception {
         Map<String, String> props = new HashMap<>();
         props.put(SQLiteConnectorConfig.DATABASE_FILE.name(), db.databaseFile().toString());
         props.put(CommonConnectorConfig.TOPIC_PREFIX.name(), "test");
@@ -95,7 +113,7 @@ public class TriggerReconcilerIT {
 
         try (SQLiteConnection connection = new SQLiteConnection(db.databaseFile().toString())) {
             schema.refresh(connection);
-            return TriggerReconciler.reconcile(connection, schema);
+            return TriggerReconciler.reconcile(connection, schema, previouslyMonitoredTables);
         }
     }
 }

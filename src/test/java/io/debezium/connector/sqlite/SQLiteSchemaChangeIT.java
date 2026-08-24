@@ -113,7 +113,8 @@ public class SQLiteSchemaChangeIT extends AbstractAsyncEngineConnectorTest {
 
         database.connection().execute("INSERT INTO orders (id, name, note) VALUES (2, 'b', 'hello')");
 
-        List<SourceRecord> records = consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".orders");
+        // 2 data rows plus 1 schema change record for the mid-stream ADD COLUMN.
+        List<SourceRecord> records = consumeRecordsByTopic(3, false).recordsForTopic(TOPIC_PREFIX + ".orders");
         assertThat(records).hasSize(2);
         assertThat(after(records.get(1)).getString("note")).isEqualTo("hello");
     }
@@ -175,7 +176,8 @@ public class SQLiteSchemaChangeIT extends AbstractAsyncEngineConnectorTest {
 
         database.connection().execute("INSERT INTO audit (id, note) VALUES (1, 'x')");
 
-        List<SourceRecord> records = consumeRecordsByTopic(1, false).recordsForTopic(TOPIC_PREFIX + ".audit");
+        // 1 data row plus 1 schema change record for the new table.
+        List<SourceRecord> records = consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".audit");
         assertThat(records).hasSize(1);
         assertThat(after(records.get(0)).getString("note")).isEqualTo("x");
     }
@@ -213,7 +215,8 @@ public class SQLiteSchemaChangeIT extends AbstractAsyncEngineConnectorTest {
         // No double capture: the single insert produced exactly one CDC row, under the new name.
         assertThat(tablesLoggedAfter(before)).containsExactly("sales");
 
-        List<SourceRecord> sales = consumeRecordsByTopic(1, false).recordsForTopic(TOPIC_PREFIX + ".sales");
+        // 1 data row plus 2 schema change records for the rename (a DROP for orders, a CREATE for sales).
+        List<SourceRecord> sales = consumeRecordsByTopic(3, false).recordsForTopic(TOPIC_PREFIX + ".sales");
         assertThat(sales).hasSize(1);
         assertThat(after(sales.get(0)).getString("name")).isEqualTo("b");
     }

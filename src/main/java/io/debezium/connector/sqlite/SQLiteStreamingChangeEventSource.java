@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,6 +21,7 @@ import io.debezium.pipeline.source.spi.ChangeEventSource.ChangeEventSourceContex
 import io.debezium.pipeline.source.spi.StreamingChangeEventSource;
 import io.debezium.relational.Table;
 import io.debezium.relational.TableId;
+import io.debezium.schema.SchemaChangeEvent;
 import io.debezium.util.Clock;
 import io.debezium.util.Metronome;
 
@@ -107,7 +109,7 @@ class SQLiteStreamingChangeEventSource
         Metronome metronome = Metronome.sleeper(config.getPollInterval(), clock);
 
         while (context.isRunning()) {
-            reconcileIfSchemaChanged();
+            reconcileIfSchemaChanged(partition);
             compactIfNeeded();
             List<CdcLogRow> batch = readBatch();
             if (batch.isEmpty()) {
@@ -129,26 +131,68 @@ class SQLiteStreamingChangeEventSource
      * during the snapshot. A bump with no relevant change, for example a {@code CREATE INDEX}, reconciles
      * to a no-op.
      */
-    private void reconcileIfSchemaChanged() {
+    private void reconcileIfSchemaChanged(SQLitePartition partition) throws InterruptedException {
         long current = readSchemaVersion();
         if (lastSchemaVersion == null || current != lastSchemaVersion) {
             if (lastSchemaVersion != null) {
                 LOGGER.debug("SQLite schema_version changed from {} to {}; reconciling capture triggers",
                         lastSchemaVersion, current);
             }
-            reconcileNow(current);
+            reconcileNow(partition, current);
         }
     }
 
-    private void reconcileNow(long schemaVersion) {
+    private void reconcileNow(SQLitePartition partition, long schemaVersion) throws InterruptedException {
+        Map<String, Table> tablesBeforeRefresh = tablesByName();
+        ReconcileResult result;
         try {
             schema.refresh(connection);
-            TriggerReconciler.reconcile(connection, schema);
+            result = TriggerReconciler.reconcile(connection, schema, tablesBeforeRefresh.keySet());
         }
         catch (SQLException e) {
             throw new DebeziumException("Failed to reconcile capture triggers after a schema change", e);
         }
         lastSchemaVersion = schemaVersion;
+        dispatchSchemaChangeEvents(partition, result, tablesBeforeRefresh);
+    }
+
+    private Map<String, Table> tablesByName() {
+        return schema.tableIds().stream().collect(Collectors.toMap(TableId::table, schema::tableFor));
+    }
+
+    /**
+     * Announces each table the reconcile touched: a created or altered table dispatches with its
+     * current shape, a dropped table dispatches with the shape it had just before the refresh removed
+     * it. No literal DDL is ever available, so {@code ddl} is always null.
+     */
+    private void dispatchSchemaChangeEvents(SQLitePartition partition, ReconcileResult result, Map<String, Table> tablesBeforeRefresh)
+            throws InterruptedException {
+        for (String table : result.created()) {
+            TableId tableId = findTable(table).orElseThrow();
+            dispatchSchemaChangeEvent(partition, tableId,
+                    SchemaChangeEvent.ofCreate(partition, effectiveOffset, config.getLogicalName(), null, null, schema.tableFor(tableId), false));
+        }
+        for (String table : result.altered()) {
+            TableId tableId = findTable(table).orElseThrow();
+            dispatchSchemaChangeEvent(partition, tableId,
+                    SchemaChangeEvent.ofAlter(partition, effectiveOffset, config.getLogicalName(), null, null, schema.tableFor(tableId)));
+        }
+        for (String table : result.dropped()) {
+            Table droppedTable = tablesBeforeRefresh.get(table);
+            dispatchSchemaChangeEvent(partition, droppedTable.id(),
+                    SchemaChangeEvent.ofDrop(partition, effectiveOffset, config.getLogicalName(), null, null, droppedTable));
+        }
+    }
+
+    private void dispatchSchemaChangeEvent(SQLitePartition partition, TableId tableId, SchemaChangeEvent event) throws InterruptedException {
+        dispatcher.dispatchSchemaChangeEvent(partition, effectiveOffset, tableId, (receiver) -> {
+            try {
+                receiver.schemaChangeEvent(event);
+            }
+            catch (Exception e) {
+                throw new DebeziumException(e);
+            }
+        });
     }
 
     private long readSchemaVersion() {
@@ -200,7 +244,7 @@ class SQLiteStreamingChangeEventSource
     private void dispatch(SQLitePartition partition, CdcLogRow row) throws InterruptedException {
         // Advance the offset first so a skipped row is not read again on the next poll.
         effectiveOffset.setChangeId(row.changeId());
-        Optional<TableId> tableId = resolveTable(row.tableName());
+        Optional<TableId> tableId = resolveTable(partition, row.tableName());
         if (tableId.isEmpty()) {
             LOGGER.warn("Skipping change {} for table '{}' that is not monitored; it was likely renamed or dropped",
                     row.changeId(), row.tableName());
@@ -220,14 +264,14 @@ class SQLiteStreamingChangeEventSource
      * it reconciles once, if the schema has moved since the last reconcile, and looks again. An empty
      * result means the table is gone, renamed away or dropped, and the caller skips the row.
      */
-    private Optional<TableId> resolveTable(String tableName) {
+    private Optional<TableId> resolveTable(SQLitePartition partition, String tableName) throws InterruptedException {
         Optional<TableId> found = findTable(tableName);
         if (found.isPresent()) {
             return found;
         }
         long current = readSchemaVersion();
         if (lastSchemaVersion == null || current != lastSchemaVersion) {
-            reconcileNow(current);
+            reconcileNow(partition, current);
             found = findTable(tableName);
         }
         return found;
