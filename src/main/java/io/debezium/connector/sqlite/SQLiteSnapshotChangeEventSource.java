@@ -6,10 +6,12 @@
 package io.debezium.connector.sqlite;
 
 import java.sql.SQLException;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
+import io.debezium.DebeziumException;
 import io.debezium.jdbc.MainConnectionProvidingConnectionFactory;
 import io.debezium.pipeline.EventDispatcher;
 import io.debezium.pipeline.notification.NotificationService;
@@ -52,11 +54,21 @@ class SQLiteSnapshotChangeEventSource extends RelationalSnapshotChangeEventSourc
     }
 
     @Override
-    protected Set<TableId> getAllTableIds(RelationalSnapshotContext<SQLitePartition, SQLiteOffsetContext> snapshotContext)
-            throws SQLException {
-        // The base filters this through the system-tables predicate, dropping sqlite_* and the
-        // connector's own _debezium_ tables. SQLite has no catalog, so the catalog name is null.
-        return jdbcConnection.getAllTableIds(null);
+    public SnapshottingTask getSnapshottingTask(SQLitePartition partition, SQLiteOffsetContext previousOffset) {
+        SnapshottingTask task = super.getSnapshottingTask(partition, previousOffset);
+        if (task.snapshotData() && !task.snapshotSchema()) {
+            // The stock snapshotter modes skip the schema pass for a non-historized DatabaseSchema. Force
+            // it back on whenever data is actually being snapshotted; leave snapshot.mode=no_data alone.
+            return new SnapshottingTask(true, task.snapshotData(), task.getDataCollections(), task.getFilterQueries(), task.isOnDemand());
+        }
+        return task;
+    }
+
+    @Override
+    protected Set<TableId> getAllTableIds(RelationalSnapshotContext<SQLitePartition, SQLiteOffsetContext> snapshotContext) {
+        // The schema already holds the monitored tables, read and filtered at task startup. Returning
+        // them here avoids a database read so the high-water mark stays the first read of the view.
+        return schema.tableIds();
     }
 
     @Override
@@ -98,9 +110,46 @@ class SQLiteSnapshotChangeEventSource extends RelationalSnapshotChangeEventSourc
 
     @Override
     protected SchemaChangeEvent getCreateTableEvent(RelationalSnapshotContext<SQLitePartition, SQLiteOffsetContext> snapshotContext, Table table) {
-        // Required by the base, but never invoked: the SQLite schema is not historized, so the base
-        // skips persisting schema history.
-        return SchemaChangeEvent.ofSnapshotCreate(snapshotContext.partition, snapshotContext.offset, snapshotContext.catalogName, table);
+        // The schema-changes topic key requires a non-null databaseName; snapshotContext.catalogName is
+        // always null for SQLite, so this uses the same logical-name stand-in as SQLiteSourceInfo.database().
+        return SchemaChangeEvent.ofSnapshotCreate(snapshotContext.partition, snapshotContext.offset, connectorConfig.getLogicalName(), table);
+    }
+
+    @Override
+    protected void createSchemaChangeEventsForTables(ChangeEventSourceContext sourceContext,
+                                                     RelationalSnapshotContext<SQLitePartition, SQLiteOffsetContext> snapshotContext,
+                                                     SnapshottingTask snapshottingTask)
+            throws Exception {
+        // The base skips this loop for a non-historized schema; this override runs it regardless, so
+        // downstream consumers still get one SchemaChangeEvent per table.
+        tryStartingSnapshot(snapshotContext);
+        for (Iterator<TableId> iterator = getTablesForSchemaChange(snapshotContext).iterator(); iterator.hasNext();) {
+            TableId tableId = iterator.next();
+            if (!sourceContext.isRunning()) {
+                throw new InterruptedException("Interrupted while capturing structure of table " + tableId);
+            }
+
+            snapshotContext.offset.event(tableId, getClock().currentTime());
+            if (!snapshottingTask.snapshotData() && !iterator.hasNext()) {
+                lastSnapshotRecord(snapshotContext);
+            }
+
+            Table table = snapshotContext.tables.forTable(tableId);
+            if (table == null) {
+                throw new DebeziumException("Unable to find relational table model for '" + tableId +
+                        "', there may be an issue with your include/exclude list configuration.");
+            }
+
+            SchemaChangeEvent event = getCreateTableEvent(snapshotContext, table);
+            dispatcher.dispatchSchemaChangeEvent(snapshotContext.partition, snapshotContext.offset, tableId, (receiver) -> {
+                try {
+                    receiver.schemaChangeEvent(event);
+                }
+                catch (Exception e) {
+                    throw new DebeziumException(e);
+                }
+            });
+        }
     }
 
     @Override
