@@ -35,9 +35,13 @@ public final class TriggerReconciler {
 
     /**
      * Rebuilds the triggers of every monitored table whose installed triggers no longer match its
-     * columns, and reports the tables created, altered, or dropped.
+     * columns, and reports the tables created, altered, or dropped. A table dropped outright leaves no
+     * orphaned trigger, so {@code previouslyMonitoredTables} is compared against the current schema to
+     * still report it dropped.
      */
-    public static ReconcileResult reconcile(SQLiteConnection connection, SQLiteDatabaseSchema schema) throws SQLException {
+    public static ReconcileResult reconcile(SQLiteConnection connection, SQLiteDatabaseSchema schema,
+                                            Set<String> previouslyMonitoredTables)
+            throws SQLException {
         Map<String, String> installed = connection.readConnectorTriggerSql();
         Set<String> monitoredTables = new LinkedHashSet<>();
         List<String> created = new ArrayList<>();
@@ -55,13 +59,14 @@ public final class TriggerReconciler {
                 LOGGER.info("Rebuilt the capture triggers for table '{}' after a schema change", table);
             }
         }
-        List<String> dropped = new ArrayList<>();
         for (String orphan : orphanedTriggers(installed.keySet(), monitoredTables)) {
             connection.execute("DROP TRIGGER IF EXISTS " + orphan);
             LOGGER.info("Dropped orphaned capture trigger '{}' left by a table that is no longer monitored", orphan);
-            TriggerGenerator.tableNameFor(orphan).ifPresent(dropped::add);
         }
-        return new ReconcileResult(created, altered, dropped.stream().distinct().collect(Collectors.toList()));
+        List<String> dropped = previouslyMonitoredTables.stream()
+                .filter(table -> !monitoredTables.contains(table))
+                .collect(Collectors.toList());
+        return new ReconcileResult(created, altered, dropped);
     }
 
     static List<String> orphanedTriggers(Set<String> installedTriggerNames, Set<String> monitoredTables) {
