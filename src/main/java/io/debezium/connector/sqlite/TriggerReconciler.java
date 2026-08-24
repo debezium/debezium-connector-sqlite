@@ -35,28 +35,33 @@ public final class TriggerReconciler {
 
     /**
      * Rebuilds the triggers of every monitored table whose installed triggers no longer match its
-     * columns, and returns the names of the tables rebuilt.
+     * columns, and reports the tables created, altered, or dropped.
      */
-    public static List<String> reconcile(SQLiteConnection connection, SQLiteDatabaseSchema schema) throws SQLException {
+    public static ReconcileResult reconcile(SQLiteConnection connection, SQLiteDatabaseSchema schema) throws SQLException {
         Map<String, String> installed = connection.readConnectorTriggerSql();
         Set<String> monitoredTables = new LinkedHashSet<>();
-        List<String> rebuilt = new ArrayList<>();
+        List<String> created = new ArrayList<>();
+        List<String> altered = new ArrayList<>();
         for (TableId tableId : schema.tableIds()) {
             String table = tableId.table();
             monitoredTables.add(table);
+            List<String> triggerNames = TriggerGenerator.triggerNames(table);
+            boolean hadInstalledTriggers = triggerNames.stream().anyMatch(installed::containsKey);
             List<String> columns = TriggerInstaller.readColumnNames(connection, table);
             List<String> desired = TriggerGenerator.createTriggers(table, columns);
-            if (!triggersMatch(desired, TriggerGenerator.triggerNames(table), installed)) {
+            if (!triggersMatch(desired, triggerNames, installed)) {
                 TriggerInstaller.rebuild(connection, table);
-                rebuilt.add(table);
+                (hadInstalledTriggers ? altered : created).add(table);
                 LOGGER.info("Rebuilt the capture triggers for table '{}' after a schema change", table);
             }
         }
+        List<String> dropped = new ArrayList<>();
         for (String orphan : orphanedTriggers(installed.keySet(), monitoredTables)) {
             connection.execute("DROP TRIGGER IF EXISTS " + orphan);
             LOGGER.info("Dropped orphaned capture trigger '{}' left by a table that is no longer monitored", orphan);
+            TriggerGenerator.tableNameFor(orphan).ifPresent(dropped::add);
         }
-        return rebuilt;
+        return new ReconcileResult(created, altered, dropped.stream().distinct().collect(Collectors.toList()));
     }
 
     static List<String> orphanedTriggers(Set<String> installedTriggerNames, Set<String> monitoredTables) {
