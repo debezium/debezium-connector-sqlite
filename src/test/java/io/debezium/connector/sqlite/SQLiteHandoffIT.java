@@ -66,8 +66,8 @@ public class SQLiteHandoffIT extends AbstractAsyncEngineConnectorTest {
         assertConnectorIsRunning();
 
         // Consuming the snapshot records first guarantees the snapshot has run and fixed the watermark, so
-        // the change written next is unambiguously after it.
-        List<SourceRecord> snapshotRows = consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".t");
+        // the change written next is unambiguously after it. 2 data rows plus 1 schema change record.
+        List<SourceRecord> snapshotRows = consumeRecordsByTopic(3, false).recordsForTopic(TOPIC_PREFIX + ".t");
         assertThat(snapshotRows).hasSize(2);
         assertThat(snapshotRows).allSatisfy(record -> assertThat(operation(record)).isEqualTo(Envelope.Operation.READ.code()));
         assertThat(snapshotRows).extracting(record -> ((Struct) record.key()).getInt64("id")).containsExactlyInAnyOrder(1L, 2L);

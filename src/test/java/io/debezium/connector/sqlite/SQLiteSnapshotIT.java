@@ -11,6 +11,7 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.source.SourceRecord;
@@ -68,8 +69,8 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
         assertConnectorIsRunning();
 
         // assertRecords=false skips the Avro/Apicurio schema validation, which the connector does not
-        // pull in as a test dependency.
-        SourceRecords records = consumeRecordsByTopic(3, false);
+        // pull in as a test dependency. 3 data rows plus 1 schema change record for the table.
+        SourceRecords records = consumeRecordsByTopic(4, false);
         List<SourceRecord> customers = records.recordsForTopic(TOPIC_PREFIX + ".customers");
         assertThat(customers).hasSize(3);
 
@@ -106,14 +107,18 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
 
-        SourceRecords records = consumeRecordsByTopic(3, false);
+        // 3 data rows plus 1 schema change record per table (orders, products).
+        SourceRecords records = consumeRecordsByTopic(5, false);
 
         // Every monitored table is snapshotted, each row as a read record.
         List<SourceRecord> orders = records.recordsForTopic(TOPIC_PREFIX + ".orders");
         List<SourceRecord> products = records.recordsForTopic(TOPIC_PREFIX + ".products");
         assertThat(orders).hasSize(1);
         assertThat(products).hasSize(2);
-        assertThat(records.allRecordsInOrder()).allSatisfy(record -> assertThat(
+        assertThat(records.recordsForTopic(TOPIC_PREFIX)).hasSize(2);
+        assertThat(orders).allSatisfy(record -> assertThat(
+                ((Struct) record.value()).getString(Envelope.FieldName.OPERATION)).isEqualTo(Envelope.Operation.READ.code()));
+        assertThat(products).allSatisfy(record -> assertThat(
                 ((Struct) record.value()).getString(Envelope.FieldName.OPERATION)).isEqualTo(Envelope.Operation.READ.code()));
 
         // Keys are the integer primary keys.
@@ -160,7 +165,8 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
 
-        List<SourceRecord> rows = consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".t");
+        // 2 data rows plus 1 schema change record for the table.
+        List<SourceRecord> rows = consumeRecordsByTopic(3, false).recordsForTopic(TOPIC_PREFIX + ".t");
         assertThat(rows).hasSize(2);
 
         Struct blobRow = rows.stream().map(SQLiteSnapshotIT::after).filter(after -> after.getInt64("id") == 1L).findFirst().orElseThrow();
@@ -193,7 +199,8 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
 
-        List<SourceRecord> rows = consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".t");
+        // 2 data rows plus 1 schema change record for the table.
+        List<SourceRecord> rows = consumeRecordsByTopic(3, false).recordsForTopic(TOPIC_PREFIX + ".t");
         assertThat(rows).hasSize(2);
 
         Struct mismatch = rows.stream().map(SQLiteSnapshotIT::after).filter(after -> after.getInt64("id") == 1L).findFirst().orElseThrow();
@@ -226,7 +233,8 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
 
-        SourceRecords records = consumeRecordsByTopic(2, false);
+        // 2 data rows plus 1 schema change record for the table.
+        SourceRecords records = consumeRecordsByTopic(3, false);
         List<SourceRecord> rows = records.recordsForTopic(TOPIC_PREFIX + ".t");
         assertThat(rows).hasSize(2);
 
@@ -253,7 +261,8 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
 
-        assertThat(consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".t")).hasSize(2);
+        // 2 data rows plus 1 schema change record for the table.
+        assertThat(consumeRecordsByTopic(3, false).recordsForTopic(TOPIC_PREFIX + ".t")).hasSize(2);
 
         // initial_only takes the snapshot and then does not transition to streaming.
         Awaitility.await().atMost(10, TimeUnit.SECONDS)
@@ -322,13 +331,53 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
 
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
-        assertThat(consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".t")).hasSize(2);
+        // 2 data rows plus 1 schema change record for the table.
+        assertThat(consumeRecordsByTopic(3, false).recordsForTopic(TOPIC_PREFIX + ".t")).hasSize(2);
         stopConnector();
 
         // A completed-snapshot offset is now stored, but always snapshots again on the next start.
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
-        assertThat(consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".t")).hasSize(2);
+        assertThat(consumeRecordsByTopic(3, false).recordsForTopic(TOPIC_PREFIX + ".t")).hasSize(2);
+    }
+
+    @Test
+    public void shouldEmitASchemaChangeEventPerTableDuringSnapshot() throws Exception {
+        database.connection().execute(
+                "CREATE TABLE orders (id INTEGER PRIMARY KEY, total REAL)",
+                "CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT)");
+        database.connection().execute(
+                "INSERT INTO orders (id, total) VALUES (1, 9.5)",
+                "INSERT INTO products (id, name) VALUES (1, 'Widget')");
+
+        Configuration config = Configuration.create()
+                .with(SQLiteConnectorConfig.DATABASE_FILE, database.databaseFile().toString())
+                .with(CommonConnectorConfig.TOPIC_PREFIX, TOPIC_PREFIX)
+                .with(SQLiteConnectorConfig.SNAPSHOT_MODE, "initial")
+                .build();
+
+        start(SQLiteSourceConnector.class, config);
+        assertConnectorIsRunning();
+
+        // One data row per table, plus one schema change record per table on the bare topic-prefix topic.
+        SourceRecords records = consumeRecordsByTopic(4, false);
+        List<SourceRecord> schemaChanges = records.recordsForTopic(TOPIC_PREFIX);
+        assertThat(schemaChanges).hasSize(2);
+
+        for (SourceRecord record : schemaChanges) {
+            Struct value = (Struct) record.value();
+            assertThat(value.getString("ddl")).isNull();
+            List<Struct> tableChanges = value.getArray("tableChanges");
+            assertThat(tableChanges).hasSize(1);
+            assertThat(tableChanges.get(0).get("type")).isEqualTo("CREATE");
+        }
+
+        List<String> changedTableIds = schemaChanges.stream()
+                .map(record -> ((Struct) record.value()).<Struct> getArray("tableChanges").get(0))
+                .map(tableChange -> (String) tableChange.get("id"))
+                .collect(Collectors.toList());
+        assertThat(changedTableIds).anySatisfy(id -> assertThat(id).contains("orders"));
+        assertThat(changedTableIds).anySatisfy(id -> assertThat(id).contains("products"));
     }
 
     private void insertCdcLogRow(long changeId) throws SQLException {

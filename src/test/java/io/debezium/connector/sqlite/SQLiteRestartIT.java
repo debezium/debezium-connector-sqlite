@@ -62,7 +62,8 @@ public class SQLiteRestartIT extends AbstractAsyncEngineConnectorTest {
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
 
-        List<SourceRecord> snapshotRows = consumeRecordsByTopic(1, false).recordsForTopic(TOPIC_PREFIX + ".t");
+        // 1 data row plus 1 schema change record for the table.
+        List<SourceRecord> snapshotRows = consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".t");
         assertThat(snapshotRows).hasSize(1);
 
         database.connection().execute(

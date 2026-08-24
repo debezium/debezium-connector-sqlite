@@ -62,7 +62,8 @@ public class SQLiteCompactionIT extends AbstractAsyncEngineConnectorTest {
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
 
-        assertThat(consumeRecordsByTopic(1, false).recordsForTopic(TOPIC_PREFIX + ".t")).hasSize(1);
+        // 1 data row plus 1 schema change record for the table.
+        assertThat(consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".t")).hasSize(1);
 
         database.connection().execute(
                 "INSERT INTO t (id, name) VALUES (2, 'b')",
@@ -96,7 +97,8 @@ public class SQLiteCompactionIT extends AbstractAsyncEngineConnectorTest {
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
 
-        assertThat(consumeRecordsByTopic(1, false).recordsForTopic(TOPIC_PREFIX + ".t")).hasSize(1);
+        // 1 data row plus 1 schema change record for the table.
+        assertThat(consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".t")).hasSize(1);
 
         database.connection().execute("INSERT INTO t (id, name) VALUES (2, 'b')");
         assertThat(consumeRecordsByTopic(1, false).recordsForTopic(TOPIC_PREFIX + ".t")).hasSize(1);
