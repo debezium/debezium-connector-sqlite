@@ -13,6 +13,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +28,7 @@ import io.debezium.pipeline.source.spi.StreamingChangeEventSource;
 import io.debezium.relational.Table;
 import io.debezium.relational.TableId;
 import io.debezium.relational.Tables;
+import io.debezium.schema.SchemaChangeEvent;
 import io.debezium.util.Clock;
 import io.debezium.util.Metronome;
 
@@ -110,7 +113,7 @@ class SQLiteStreamingChangeEventSource
 
         while (context.isRunning()) {
             offsetActivityMonitorService.pulse(partition, offsetContext);
-            reconcileIfSchemaChanged();
+            reconcileIfSchemaChanged(partition);
             compactIfNeeded();
             List<CdcLogRow> batch = readBatch();
             if (batch.isEmpty()) {
@@ -130,27 +133,32 @@ class SQLiteStreamingChangeEventSource
      * up a schema change made while streaming. The first poll always reconciles, catching a change made
      * during the snapshot; an irrelevant bump such as {@code CREATE INDEX} reconciles to a no-op.
      */
-    private void reconcileIfSchemaChanged() {
+    private void reconcileIfSchemaChanged(SQLitePartition partition) throws InterruptedException {
         long current = readSchemaVersion();
         if (lastSchemaVersion == null || current != lastSchemaVersion) {
             if (lastSchemaVersion != null) {
                 LOGGER.debug("SQLite schema_version changed from {} to {}; reconciling capture triggers",
                         lastSchemaVersion, current);
             }
-            reconcileNow();
+            reconcileNow(partition);
         }
     }
 
-    private void reconcileNow() {
+    private void reconcileNow(SQLitePartition partition) throws InterruptedException {
+        Map<TableId, Table> emitted = currentShapes();
+        ReconcileResult result;
+        Tables database;
+        long boundary;
         try {
-            Map<TableId, Table> emitted = currentShapes();
-            long boundary = connection.readMaxChangeId();
-            TriggerReconciler.reconcile(connection, config.getTableFilters().dataCollectionFilter());
-            deferShapeChanges(emitted, schema.readDatabaseTables(connection), boundary);
+            boundary = connection.readMaxChangeId();
+            result = TriggerReconciler.reconcile(connection, config.getTableFilters().dataCollectionFilter(), monitoredNames(emitted));
+            database = schema.readDatabaseTables(connection);
         }
         catch (SQLException e) {
             throw new DebeziumException("Failed to reconcile capture triggers after a schema change", e);
         }
+        deferShapeChanges(emitted, database, boundary);
+        dispatchSchemaChangeEvents(partition, result, emitted, database);
         // The reconcile's own DROP/CREATE TRIGGER statements bump schema_version, so read it back
         // afterward. Recording the pre-reconcile value would leave lastSchemaVersion stale and force a
         // redundant no-op reconcile on the next poll.
@@ -211,6 +219,48 @@ class SQLiteStreamingChangeEventSource
         return shapes;
     }
 
+    private Set<String> monitoredNames(Map<TableId, Table> emitted) {
+        return emitted.keySet().stream().map(TableId::table).collect(Collectors.toSet());
+    }
+
+    /**
+     * Announces each table the reconcile touched: a created or altered table with its current shape, a
+     * dropped table with the shape it had before the change. The current shape comes from the database
+     * read, since the emitted schema may still hold the old shape until the backlog drains. No literal DDL
+     * is available, so {@code ddl} is always null.
+     */
+    private void dispatchSchemaChangeEvents(SQLitePartition partition, ReconcileResult result,
+                                            Map<TableId, Table> emitted, Tables database)
+            throws InterruptedException {
+        for (String table : result.created()) {
+            TableId tableId = findTable(table).orElseThrow();
+            dispatchSchemaChangeEvent(partition, tableId,
+                    SchemaChangeEvent.ofCreate(partition, effectiveOffset, config.getLogicalName(), null, null, database.forTable(tableId), false));
+        }
+        for (String table : result.altered()) {
+            TableId tableId = findTable(table).orElseThrow();
+            dispatchSchemaChangeEvent(partition, tableId,
+                    SchemaChangeEvent.ofAlter(partition, effectiveOffset, config.getLogicalName(), null, null, database.forTable(tableId)));
+        }
+        for (String table : result.dropped()) {
+            Table droppedTable = emitted.values().stream()
+                    .filter(t -> t.id().table().equals(table)).findFirst().orElseThrow();
+            dispatchSchemaChangeEvent(partition, droppedTable.id(),
+                    SchemaChangeEvent.ofDrop(partition, effectiveOffset, config.getLogicalName(), null, null, droppedTable));
+        }
+    }
+
+    private void dispatchSchemaChangeEvent(SQLitePartition partition, TableId tableId, SchemaChangeEvent event) throws InterruptedException {
+        dispatcher.dispatchSchemaChangeEvent(partition, effectiveOffset, tableId, (receiver) -> {
+            try {
+                receiver.schemaChangeEvent(event);
+            }
+            catch (Exception e) {
+                throw new DebeziumException(e);
+            }
+        });
+    }
+
     private long readSchemaVersion() {
         try {
             return connection.readSchemaVersion();
@@ -261,7 +311,7 @@ class SQLiteStreamingChangeEventSource
         applyDueSwaps(row.changeId());
         // Advance the offset first so a skipped row is not read again on the next poll.
         effectiveOffset.setChangeId(row.changeId());
-        Optional<TableId> tableId = resolveTable(row.tableName());
+        Optional<TableId> tableId = resolveTable(partition, row.tableName());
         if (tableId.isEmpty()) {
             LOGGER.warn("Skipping change {} for table '{}' that is not monitored; it was likely renamed or dropped",
                     row.changeId(), row.tableName());
@@ -280,14 +330,14 @@ class SQLiteStreamingChangeEventSource
      * does not have yet when a {@code CREATE} or {@code RENAME} this poll has not caught, so it reconciles
      * once if the schema has moved and looks again. Empty means the table is gone and the caller skips it.
      */
-    private Optional<TableId> resolveTable(String tableName) {
+    private Optional<TableId> resolveTable(SQLitePartition partition, String tableName) throws InterruptedException {
         Optional<TableId> found = findTable(tableName);
         if (found.isPresent()) {
             return found;
         }
         long current = readSchemaVersion();
         if (lastSchemaVersion == null || current != lastSchemaVersion) {
-            reconcileNow();
+            reconcileNow(partition);
             found = findTable(tableName);
         }
         return found;

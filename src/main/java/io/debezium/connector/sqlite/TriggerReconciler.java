@@ -37,9 +37,12 @@ public final class TriggerReconciler {
     /**
      * Rebuilds the triggers of every captured table whose installed triggers no longer match its columns,
      * and reports the tables created, altered, or dropped. The table set is read from the database and
-     * filtered, not taken from the connector schema, so it reflects the tables that exist right now.
+     * filtered, not taken from the connector schema. A table dropped outright leaves no orphaned trigger,
+     * so {@code previouslyMonitoredTables} is compared against the current tables to still report it dropped.
      */
-    public static ReconcileResult reconcile(SQLiteConnection connection, TableFilter tableFilter) throws SQLException {
+    public static ReconcileResult reconcile(SQLiteConnection connection, TableFilter tableFilter,
+                                            Set<String> previouslyMonitoredTables)
+            throws SQLException {
         Map<String, String> installed = connection.readConnectorTriggerSql();
         Set<String> monitoredTables = new LinkedHashSet<>();
         List<String> created = new ArrayList<>();
@@ -60,13 +63,14 @@ public final class TriggerReconciler {
                 LOGGER.info("Rebuilt the capture triggers for table '{}' after a schema change", table);
             }
         }
-        List<String> dropped = new ArrayList<>();
         for (String orphan : orphanedTriggers(installed.keySet(), monitoredTables)) {
             connection.execute("DROP TRIGGER IF EXISTS " + orphan);
             LOGGER.info("Dropped orphaned capture trigger '{}' left by a table that is no longer monitored", orphan);
-            TriggerGenerator.tableNameFor(orphan).ifPresent(dropped::add);
         }
-        return new ReconcileResult(created, altered, dropped.stream().distinct().collect(Collectors.toList()));
+        List<String> dropped = previouslyMonitoredTables.stream()
+                .filter(table -> !monitoredTables.contains(table))
+                .collect(Collectors.toList());
+        return new ReconcileResult(created, altered, dropped);
     }
 
     static List<String> orphanedTriggers(Set<String> installedTriggerNames, Set<String> monitoredTables) {
