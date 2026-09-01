@@ -38,6 +38,13 @@ public final class CdcLog {
     public static final String OPERATION_DELETE = "d";
 
     /**
+     * Marker key for a blob value in the row JSON. {@code json_object} cannot hold raw bytes, so a
+     * blob is captured hex-encoded inside a tagged nested object, {@code {"__dbz_hex__": "<hex>"}}.
+     * A non-blob value is a bare JSON scalar, so the two can never be confused on read-back.
+     */
+    public static final String BLOB_HEX_MARKER = "__dbz_hex__";
+
+    /**
      * The frozen {@code CREATE TABLE} statement, built from the column constants so the DDL and the
      * read names cannot drift. {@code IF NOT EXISTS} makes it safe to run on every startup.
      */

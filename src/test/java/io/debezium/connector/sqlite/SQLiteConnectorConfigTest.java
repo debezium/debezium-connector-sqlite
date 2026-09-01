@@ -49,6 +49,24 @@ class SQLiteConnectorConfigTest {
     }
 
     @Test
+    void getCdcLogBatchSizeReturnsTheConfiguredValue() {
+        assertThat(configWith(Map.of()).getCdcLogBatchSize()).isEqualTo(1000);
+        assertThat(configWith(Map.of("cdc.log.batch.size", "50")).getCdcLogBatchSize()).isEqualTo(50);
+    }
+
+    @Test
+    void logCompactionThresholdDefaultsTo10000() {
+        assertThat(ALL_FIELD_NAMES).contains("log.compaction.threshold");
+        assertThat(SQLiteConnectorConfig.LOG_COMPACTION_THRESHOLD.defaultValue()).isEqualTo(10000);
+    }
+
+    @Test
+    void getLogCompactionThresholdReturnsTheConfiguredValue() {
+        assertThat(configWith(Map.of()).getLogCompactionThreshold()).isEqualTo(10000);
+        assertThat(configWith(Map.of("log.compaction.threshold", "500")).getLogCompactionThreshold()).isEqualTo(500);
+    }
+
+    @Test
     void pollIntervalIsInheritedWithDefault500() {
         // poll.interval.ms is provided by CommonConnectorConfig; the connector reuses it rather than
         // declaring its own, so it appears exactly once in the field set with the standard default.

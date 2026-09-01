@@ -7,6 +7,10 @@ package io.debezium.connector.sqlite;
 
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -75,6 +79,83 @@ public class SQLiteConnection extends JdbcConnection {
         String sql = String.format("SELECT COALESCE(MAX(%s), 0) FROM %s", CdcLog.CHANGE_ID, CdcLog.TABLE_NAME);
         return guarded("Failed to read the maximum change id",
                 () -> queryAndMap(sql, rs -> rs.next() ? rs.getLong(1) : 0L));
+    }
+
+    /**
+     * Reads the next batch of change rows after a cursor position, in {@code change_id} order. Each
+     * call is a short read in autocommit, bounded by {@code limit}, so it does not hold a read
+     * transaction open across the inter-poll sleep and block WAL checkpointing.
+     *
+     * @param afterChangeId the exclusive lower bound; the query returns rows with a larger change_id
+     * @param limit the maximum number of rows to return
+     * @return the matching rows in ascending {@code change_id} order, empty when none remain
+     * @throws SQLException if the query cannot be run
+     */
+    public List<CdcLogRow> readChanges(long afterChangeId, int limit) throws SQLException {
+        String sql = String.format(
+                "SELECT %s, %s, %s, %s, %s, %s FROM %s WHERE %s > ? ORDER BY %s ASC LIMIT %d",
+                CdcLog.CHANGE_ID, CdcLog.TABLE_NAME_COLUMN, CdcLog.OPERATION,
+                CdcLog.OLD_ROW_DATA, CdcLog.NEW_ROW_DATA, CdcLog.COMMITTED_AT,
+                CdcLog.TABLE_NAME, CdcLog.CHANGE_ID, CdcLog.CHANGE_ID, limit);
+        return prepareQueryAndMap(sql,
+                statement -> statement.setLong(1, afterChangeId),
+                resultSet -> {
+                    List<CdcLogRow> rows = new ArrayList<>();
+                    while (resultSet.next()) {
+                        rows.add(new CdcLogRow(
+                                resultSet.getLong(1),
+                                resultSet.getString(2),
+                                resultSet.getString(3),
+                                resultSet.getString(4),
+                                resultSet.getString(5),
+                                resultSet.getLong(6)));
+                    }
+                    return rows;
+                });
+    }
+
+    /**
+     * Deletes every {@code _debezium_cdc_log} row at or below the given {@code change_id}. Callers must
+     * pass a {@code change_id} that Kafka Connect has durably committed, never one merely dispatched, so
+     * a crash before the commit never loses a row this deletes.
+     *
+     * @param changeId the inclusive upper bound; rows with this id or smaller are removed
+     * @throws SQLException if the delete cannot be run
+     */
+    public void deleteChangesUpTo(long changeId) throws SQLException {
+        String sql = String.format("DELETE FROM %s WHERE %s <= ?", CdcLog.TABLE_NAME, CdcLog.CHANGE_ID);
+        prepareUpdate(sql, statement -> statement.setLong(1, changeId));
+    }
+
+    /**
+     * Returns the database's {@code schema_version}, the header counter SQLite increments on every DDL
+     * statement. Streaming reads it at the top of each poll and re-reads the schema when it has risen,
+     * which is the only cross-connection signal that the schema changed. It moves for any DDL, including
+     * ones that touch no monitored table, so a change in the value is a prompt to look, not proof that a
+     * monitored table changed.
+     */
+    public long readSchemaVersion() throws SQLException {
+        return queryAndMap("PRAGMA schema_version", rs -> rs.next() ? rs.getLong(1) : 0L);
+    }
+
+    /**
+     * Reads the CDC capture triggers the connector installed, as a name-to-SQL map. It returns only
+     * triggers whose name carries the connector's prefix, so a user's own triggers are left out, and it
+     * reads all of them in one query so the reconcile can both compare a table's triggers and find
+     * orphaned ones. The SQL is the text SQLite stored, which it keeps verbatim except that it strips
+     * {@code IF NOT EXISTS}.
+     */
+    public Map<String, String> readConnectorTriggerSql() throws SQLException {
+        return queryAndMap("SELECT name, sql FROM sqlite_master WHERE type='trigger'", rs -> {
+            Map<String, String> triggers = new LinkedHashMap<>();
+            while (rs.next()) {
+                String name = rs.getString(1);
+                if (name.startsWith(TriggerGenerator.TRIGGER_PREFIX)) {
+                    triggers.put(name, rs.getString(2));
+                }
+            }
+            return triggers;
+        });
     }
 
     /**

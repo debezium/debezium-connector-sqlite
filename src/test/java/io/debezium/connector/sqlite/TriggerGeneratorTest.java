@@ -53,19 +53,65 @@ public class TriggerGeneratorTest {
         // An insert records the new row only, under operation code 'c'.
         assertThat(insert).contains("AFTER INSERT")
                 .contains("'" + CdcLog.OPERATION_CREATE + "'")
-                .contains("json_object('id', NEW.\"id\", 'name', NEW.\"name\")")
+                .contains("json_object('id', " + blobSafe("NEW", "id") + ", 'name', " + blobSafe("NEW", "name") + ")")
                 .contains("NULL,");
 
         // An update records both old and new rows, under operation code 'u'.
         assertThat(update).contains("AFTER UPDATE")
                 .contains("'" + CdcLog.OPERATION_UPDATE + "'")
-                .contains("json_object('id', OLD.\"id\", 'name', OLD.\"name\")")
-                .contains("json_object('id', NEW.\"id\", 'name', NEW.\"name\")");
+                .contains("json_object('id', " + blobSafe("OLD", "id") + ", 'name', " + blobSafe("OLD", "name") + ")")
+                .contains("json_object('id', " + blobSafe("NEW", "id") + ", 'name', " + blobSafe("NEW", "name") + ")");
 
         // A delete records the old row only, under operation code 'd'.
         assertThat(delete).contains("AFTER DELETE")
                 .contains("'" + CdcLog.OPERATION_DELETE + "'")
-                .contains("json_object('id', OLD.\"id\", 'name', OLD.\"name\")");
+                .contains("json_object('id', " + blobSafe("OLD", "id") + ", 'name', " + blobSafe("OLD", "name") + ")");
+    }
+
+    @Test
+    void wrapsEachColumnValueInABlobSafeCase() {
+        String insert = TriggerGenerator.createTriggers(TABLE, COLUMNS).get(0);
+
+        // Every column value carries a typeof check, so a blob in any column is hex-encoded.
+        assertThat(insert)
+                .contains(blobSafe("NEW", "id"))
+                .contains(blobSafe("NEW", "name"))
+                .contains("json_object('" + CdcLog.BLOB_HEX_MARKER + "', hex(NEW.\"id\"))");
+    }
+
+    @Test
+    void narrowTableDoesNotUseJsonSet() {
+        // A small column list fits one json_object call, so no merge is needed.
+        String insert = TriggerGenerator.createTriggers(TABLE, sequentialColumns(40)).get(0);
+        assertThat(insert).doesNotContain("json_set(");
+    }
+
+    @Test
+    void wideTableChunksWithJsonSetAndQuotesAwkwardNames() {
+        List<String> columns = new ArrayList<>(sequentialColumns(60));
+        // An awkward name in a later chunk, so it goes through the json_set path.
+        columns.set(55, "w\"x");
+        String insert = TriggerGenerator.createTriggers(TABLE, columns).get(0);
+
+        assertThat(insert).contains("json_set(");
+        // The name is escaped for the json path and the SQL literal; the value reference doubles the quote.
+        assertThat(insert).contains("'$.\"w\\\"x\"'")
+                .contains("NEW.\"w\"\"x\"");
+    }
+
+    /** The blob-safe value expression the generator emits for one column, per row alias. */
+    private static String blobSafe(String alias, String column) {
+        String ref = alias + ".\"" + column + "\"";
+        return "CASE WHEN typeof(" + ref + ")='blob' THEN json_object('" + CdcLog.BLOB_HEX_MARKER
+                + "', hex(" + ref + ")) ELSE " + ref + " END";
+    }
+
+    private static List<String> sequentialColumns(int count) {
+        List<String> columns = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            columns.add("c" + i);
+        }
+        return columns;
     }
 
     /** Names of every trigger SQLite has stored, read from {@code sqlite_master}. */
