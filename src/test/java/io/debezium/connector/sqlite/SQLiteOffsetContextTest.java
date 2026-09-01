@@ -7,8 +7,10 @@ package io.debezium.connector.sqlite;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Instant;
 import java.util.Map;
 
+import org.apache.kafka.connect.data.Struct;
 import org.junit.jupiter.api.Test;
 
 import io.debezium.config.CommonConnectorConfig;
@@ -16,6 +18,7 @@ import io.debezium.config.Configuration;
 import io.debezium.connector.AbstractSourceInfo;
 import io.debezium.connector.SnapshotRecord;
 import io.debezium.pipeline.CommonOffsetContext;
+import io.debezium.relational.TableId;
 
 /**
  * Unit tests for the snapshot markers {@link SQLiteOffsetContext} carries while the relational
@@ -121,6 +124,20 @@ class SQLiteOffsetContextTest {
 
         assertThat(reloaded.isInitialSnapshotRunning()).isFalse();
         assertThat(reloaded.getChangeId()).isEqualTo(3L);
+    }
+
+    @Test
+    void eventSetsCommitTimeTableAndChangeIdOnSource() {
+        SQLiteOffsetContext offset = newOffset();
+        offset.setChangeId(42L);
+        Instant committedAt = Instant.ofEpochMilli(1_700_000_000_000L);
+
+        offset.event(new TableId(null, null, "products"), committedAt);
+
+        Struct source = offset.getSourceInfo();
+        assertThat(source.getInt64(AbstractSourceInfo.TIMESTAMP_KEY)).isEqualTo(committedAt.toEpochMilli());
+        assertThat(source.getString(AbstractSourceInfo.TABLE_NAME_KEY)).isEqualTo("products");
+        assertThat(source.getInt64(SQLiteSourceInfo.CHANGE_ID_KEY)).isEqualTo(42L);
     }
 
     @Test

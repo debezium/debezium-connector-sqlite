@@ -180,6 +180,11 @@ public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
                 && getEventConvertingFailureHandlingMode() != EventConvertingFailureHandlingMode.FAIL;
     }
 
+    /** The maximum number of {@code _debezium_cdc_log} rows the streaming source reads per poll. */
+    public int getCdcLogBatchSize() {
+        return getConfig().getInteger(CDC_LOG_BATCH_SIZE);
+    }
+
     public static ConfigDef configDef() {
         return CONFIG_DEFINITION.configDef();
     }

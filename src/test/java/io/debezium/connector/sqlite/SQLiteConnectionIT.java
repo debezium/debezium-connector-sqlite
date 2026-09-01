@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.SQLException;
+import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
@@ -95,6 +96,39 @@ class SQLiteConnectionIT {
         SqliteTestHelper.insertCdcLogRow(connection, "users", 7, CdcLog.OPERATION_CREATE);
 
         assertThat(connection.readMaxChangeId()).isEqualTo(9L);
+    }
+
+    @Test
+    void readSchemaVersionRisesOnDdlAndHoldsOnDml() throws SQLException {
+        long initial = connection.readSchemaVersion();
+
+        connection.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, name TEXT)");
+        long afterCreate = connection.readSchemaVersion();
+        assertThat(afterCreate).isGreaterThan(initial);
+
+        connection.execute("ALTER TABLE orders ADD COLUMN discount REAL");
+        long afterAlter = connection.readSchemaVersion();
+        assertThat(afterAlter).isGreaterThan(afterCreate);
+
+        connection.execute("INSERT INTO orders (id, name) VALUES (1, 'a')");
+        assertThat(connection.readSchemaVersion()).isEqualTo(afterAlter);
+    }
+
+    @Test
+    void readConnectorTriggerSqlReturnsOnlyConnectorTriggers() throws SQLException {
+        connection.createCdcLogTable();
+        connection.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, name TEXT)");
+        TriggerInstaller.install(connection, "orders");
+        // A user's own trigger on the same table must not be returned.
+        connection.execute("CREATE TRIGGER user_audit AFTER INSERT ON orders BEGIN SELECT 1; END");
+
+        Map<String, String> triggers = connection.readConnectorTriggerSql();
+
+        assertThat(triggers.keySet()).containsExactlyInAnyOrder(
+                "_debezium_cdc_orders_insert",
+                "_debezium_cdc_orders_update",
+                "_debezium_cdc_orders_delete");
+        assertThat(triggers.get("_debezium_cdc_orders_insert")).contains("AFTER INSERT ON");
     }
 
     private String journalMode() throws SQLException {
