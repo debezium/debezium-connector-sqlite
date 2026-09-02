@@ -33,7 +33,6 @@ import io.debezium.pipeline.ChangeEventSourceCoordinator;
 import io.debezium.pipeline.DataChangeEvent;
 import io.debezium.pipeline.ErrorHandler;
 import io.debezium.pipeline.EventDispatcher;
-import io.debezium.pipeline.metrics.DefaultChangeEventSourceMetricsFactory;
 import io.debezium.pipeline.notification.NotificationService;
 import io.debezium.pipeline.signal.SignalProcessor;
 import io.debezium.pipeline.spi.Offsets;
@@ -154,6 +153,9 @@ public class SQLiteConnectorTask extends BaseSourceTask<SQLitePartition, SQLiteO
 
         final SQLiteEventMetadataProvider metadataProvider = new SQLiteEventMetadataProvider();
 
+        final SQLiteStreamingChangeEventSourceMetrics streamingMetrics = new SQLiteStreamingChangeEventSourceMetrics(
+                taskContext, queue, metadataProvider, schema::tableIds);
+
         final SignalProcessor<SQLitePartition, SQLiteOffsetContext> signalProcessor = new SignalProcessor<>(
                 SQLiteSourceConnector.class, connectorConfig, Map.of(),
                 getAvailableSignalChannels(),
@@ -184,7 +186,7 @@ public class SQLiteConnectorTask extends BaseSourceTask<SQLitePartition, SQLiteO
                 SQLiteSourceConnector.class,
                 connectorConfig,
                 new SQLiteChangeEventSourceFactory(connectorConfig, snapshotterService, connectionFactory, schema, dispatcher, clock),
-                new DefaultChangeEventSourceMetricsFactory<>(),
+                new SQLiteChangeEventSourceMetricsFactory(streamingMetrics),
                 dispatcher,
                 schema,
                 signalProcessor,
