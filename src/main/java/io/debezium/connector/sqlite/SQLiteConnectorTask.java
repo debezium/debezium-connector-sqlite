@@ -183,7 +183,7 @@ public class SQLiteConnectorTask extends BaseSourceTask<SQLitePartition, SQLiteO
                 errorHandler,
                 SQLiteSourceConnector.class,
                 connectorConfig,
-                new SQLiteChangeEventSourceFactory(connectorConfig, snapshotterService, connectionFactory, schema, dispatcher, clock),
+                new SQLiteChangeEventSourceFactory(connectorConfig, snapshotterService, connectionFactory, schema, dispatcher, clock, streamingMetrics),
                 new SQLiteChangeEventSourceMetricsFactory(streamingMetrics),
                 dispatcher,
                 schema,
