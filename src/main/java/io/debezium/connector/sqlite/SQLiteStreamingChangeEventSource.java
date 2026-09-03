@@ -51,6 +51,7 @@ class SQLiteStreamingChangeEventSource
     private final int batchSize;
     private final int compactionThreshold;
     private OffsetActivityMonitor<SQLitePartition, SQLiteOffsetContext> offsetActivityMonitor;
+    private final SQLiteStreamingChangeEventSourceMetrics metrics;
 
     private SQLiteOffsetContext effectiveOffset;
 
@@ -70,7 +71,8 @@ class SQLiteStreamingChangeEventSource
                                      SQLiteConnection connection,
                                      SQLiteDatabaseSchema schema,
                                      EventDispatcher<SQLitePartition, TableId> dispatcher,
-                                     Clock clock) {
+                                     Clock clock,
+                                     SQLiteStreamingChangeEventSourceMetrics metrics) {
         this.config = config;
         this.connection = connection;
         this.schema = schema;
@@ -79,6 +81,7 @@ class SQLiteStreamingChangeEventSource
         this.offsetActivityMonitorService = OffsetActivityMonitorService.lookup(config.getServiceRegistry());
         this.batchSize = config.getCdcLogBatchSize();
         this.compactionThreshold = config.getLogCompactionThreshold();
+        this.metrics = metrics;
     }
 
     /**
@@ -119,6 +122,7 @@ class SQLiteStreamingChangeEventSource
             offsetActivityMonitorService.pulse(partition, offsetContext);
             reconcileIfSchemaChanged(partition);
             compactIfNeeded();
+            metrics.setCdcLogDepth(Math.max(0, connection.readMaxChangeId() - lastCompactedChangeId));
             List<CdcLogRow> batch = readBatch();
             if (batch.isEmpty()) {
                 metronome.pause();
@@ -317,6 +321,7 @@ class SQLiteStreamingChangeEventSource
         applyDueSwaps(row.changeId());
         // Advance the offset first so a skipped row is not read again on the next poll.
         effectiveOffset.setChangeId(row.changeId());
+        metrics.setCurrentChangeId(row.changeId());
         Optional<TableId> tableId = resolveTable(partition, row.tableName());
         if (tableId.isEmpty()) {
             LOGGER.warn("Skipping change {} for table '{}' that is not monitored; it was likely renamed or dropped",
@@ -375,6 +380,7 @@ class SQLiteStreamingChangeEventSource
     @Override
     public void commitOffset(Map<String, ?> partition, Map<String, ?> offset) {
         committedChangeId = ((Number) offset.get(SQLiteOffsetContext.CHANGE_ID_KEY)).longValue();
+        metrics.setCommittedChangeId(committedChangeId);
     }
 
     /** A schema change held until streaming passes {@code boundary}. A null {@code newShape} drops the table. */

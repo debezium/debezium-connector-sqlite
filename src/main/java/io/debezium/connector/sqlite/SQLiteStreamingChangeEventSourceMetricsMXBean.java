@@ -25,8 +25,8 @@ public interface SQLiteStreamingChangeEventSourceMetricsMXBean extends Streaming
     long getCommittedChangeId();
 
     /**
-     * @return the number of CDC log rows still present above the last committed {@code change_id}, the
-     *         backlog not yet compacted; never negative
+     * @return the number of CDC log rows not yet compacted away: the highest {@code change_id} in the
+     *         log minus the last compacted {@code change_id}; never negative
      */
     long getCdcLogDepth();
 }
