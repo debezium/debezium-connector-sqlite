@@ -10,6 +10,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import io.debezium.jdbc.JdbcConnection;
+import io.debezium.relational.TableId;
+import io.debezium.relational.Tables.TableFilter;
 
 /**
  * Installs the CDC capture triggers on a source table. {@link #install(JdbcConnection, String)} reads
@@ -19,6 +21,18 @@ import io.debezium.jdbc.JdbcConnection;
 public final class TriggerInstaller {
 
     private TriggerInstaller() {
+    }
+
+    /**
+     * Installs the triggers on every captured table. The table list comes from the database, not the
+     * connector schema, and each table is kept only if the filter includes it. Installation is idempotent.
+     */
+    public static void installAll(JdbcConnection connection, TableFilter tableFilter) throws SQLException {
+        for (TableId tableId : connection.getAllTableIds(null)) {
+            if (tableFilter.isIncluded(tableId)) {
+                install(connection, tableId.table());
+            }
+        }
     }
 
     /** Installs the insert, update, and delete triggers on a source table, which must already exist. */

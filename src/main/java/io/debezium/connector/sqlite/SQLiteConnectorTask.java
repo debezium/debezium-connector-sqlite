@@ -37,7 +37,6 @@ import io.debezium.pipeline.notification.NotificationService;
 import io.debezium.pipeline.signal.SignalProcessor;
 import io.debezium.pipeline.spi.Offsets;
 import io.debezium.relational.TableId;
-import io.debezium.relational.Tables.TableFilter;
 import io.debezium.schema.SchemaFactory;
 import io.debezium.schema.SchemaNameAdjuster;
 import io.debezium.snapshot.SnapshotterService;
@@ -110,15 +109,9 @@ public class SQLiteConnectorTask extends BaseSourceTask<SQLitePartition, SQLiteO
         this.schema = new SQLiteDatabaseSchema(taskContext, topicNamingStrategy);
 
         // Install the capture triggers before the coordinator starts, so every write from now on is
-        // logged and the snapshot-to-streaming handoff has no gap. Installation is idempotent. The table
-        // list comes from the database, not the connector schema, which the sources load on their own.
-        final TableFilter tableFilter = connectorConfig.getTableFilters().dataCollectionFilter();
+        // logged and the snapshot-to-streaming handoff has no gap.
         try {
-            for (TableId tableId : connection.getAllTableIds(null)) {
-                if (tableFilter.isIncluded(tableId)) {
-                    TriggerInstaller.install(connection, tableId.table());
-                }
-            }
+            TriggerInstaller.installAll(connection, connectorConfig.getTableFilters().dataCollectionFilter());
         }
         catch (SQLException e) {
             throw new DebeziumException("Failed to install the CDC capture triggers on the SQLite database at " + databaseFilePath, e);
