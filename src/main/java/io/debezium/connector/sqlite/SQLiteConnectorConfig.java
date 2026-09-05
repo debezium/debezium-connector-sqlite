@@ -134,15 +134,17 @@ public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
                     + "'no_data' to skip the data snapshot and stream from the current position.");
 
     /**
-     * The connector's configuration, built on the relational base definition. {@code type} fields
-     * describe how to reach the database, {@code connector} fields tune behavior, and SQLite has no
-     * schemas so the schema include and exclude lists are excluded.
+     * The connector's configuration, built on the relational base definition. The connection group
+     * describes how to reach the database, the connector group tunes behavior, and the excluded fields
+     * do not apply to SQLite: it has no schemas, and it is reached through a file path rather than the
+     * relational host, port, user, password, and database name.
      */
     private static final ConfigDefinition CONFIG_DEFINITION = RelationalDatabaseConnectorConfig.CONFIG_DEFINITION.edit()
             .name("SQLite")
-            .type(DATABASE_FILE)
-            .connector(SNAPSHOT_MODE, CDC_LOG_BATCH_SIZE, NONNULL_AFFINITY_MISMATCH_FALLBACK)
-            .excluding(SCHEMA_INCLUDE_LIST, SCHEMA_EXCLUDE_LIST)
+            .group(Field.Group.CONNECTION, DATABASE_FILE)
+            .group(Field.Group.CONNECTOR, SNAPSHOT_MODE, CDC_LOG_BATCH_SIZE, NONNULL_AFFINITY_MISMATCH_FALLBACK)
+            .excluding(SCHEMA_INCLUDE_LIST, SCHEMA_EXCLUDE_LIST,
+                    HOSTNAME, PORT, USER, PASSWORD, DATABASE_NAME)
             .create();
 
     /** The full set of fields the connector accepts, derived from {@link #CONFIG_DEFINITION}. */
