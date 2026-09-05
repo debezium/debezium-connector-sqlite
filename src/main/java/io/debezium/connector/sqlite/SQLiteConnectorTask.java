@@ -9,6 +9,7 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.apache.kafka.connect.source.SourceRecord;
@@ -32,7 +33,6 @@ import io.debezium.pipeline.ChangeEventSourceCoordinator;
 import io.debezium.pipeline.DataChangeEvent;
 import io.debezium.pipeline.ErrorHandler;
 import io.debezium.pipeline.EventDispatcher;
-import io.debezium.pipeline.metrics.DefaultChangeEventSourceMetricsFactory;
 import io.debezium.pipeline.notification.NotificationService;
 import io.debezium.pipeline.signal.SignalProcessor;
 import io.debezium.pipeline.spi.Offsets;
@@ -104,9 +104,28 @@ public class SQLiteConnectorTask extends BaseSourceTask<SQLitePartition, SQLiteO
         connection.createCdcLogTable();
         connection.verifyMinimumVersion();
 
-        // The schema starts empty; the snapshot source loads it in readTableStructure and the
-        // streaming source reloads it in init, so the snapshot-skipped path also has a schema.
+        // Load the schema now so the trigger reconciler can compare the installed triggers against the
+        // current columns. The snapshot source reloads it in readTableStructure and the streaming source
+        // reloads it in init, so the snapshot-skipped path also has a schema.
         this.schema = new SQLiteDatabaseSchema(taskContext, topicNamingStrategy);
+        try {
+            this.schema.refresh(connection);
+        }
+        catch (SQLException e) {
+            throw new DebeziumException("Failed to load the SQLite schema from " + databaseFilePath, e);
+        }
+
+        // Reconcile the capture triggers against the current schema before the coordinator starts, so any
+        // write from this point on is logged with a change_id and the snapshot-to-streaming handoff stays
+        // consistent. On a fresh table this installs the triggers; on a table whose columns changed while
+        // the connector was down it rebuilds them, so a trigger left stale by a schema change never leaves
+        // the table unwritable once the connector is back up.
+        try {
+            TriggerReconciler.reconcile(connection, schema, Set.of());
+        }
+        catch (SQLException e) {
+            throw new DebeziumException("Failed to reconcile the CDC capture triggers on the SQLite database at " + databaseFilePath, e);
+        }
 
         final Offsets<SQLitePartition, SQLiteOffsetContext> previousOffsets = getPreviousOffsets(
                 new SQLitePartition.Provider(connectorConfig),
@@ -133,6 +152,9 @@ public class SQLiteConnectorTask extends BaseSourceTask<SQLitePartition, SQLiteO
         this.errorHandler = new SQLiteErrorHandler(connectorConfig, queue, errorHandler);
 
         final SQLiteEventMetadataProvider metadataProvider = new SQLiteEventMetadataProvider();
+
+        final SQLiteStreamingChangeEventSourceMetrics streamingMetrics = new SQLiteStreamingChangeEventSourceMetrics(
+                taskContext, queue, metadataProvider, schema::tableIds);
 
         final SignalProcessor<SQLitePartition, SQLiteOffsetContext> signalProcessor = new SignalProcessor<>(
                 SQLiteSourceConnector.class, connectorConfig, Map.of(),
@@ -163,8 +185,8 @@ public class SQLiteConnectorTask extends BaseSourceTask<SQLitePartition, SQLiteO
                 errorHandler,
                 SQLiteSourceConnector.class,
                 connectorConfig,
-                new SQLiteChangeEventSourceFactory(connectorConfig, snapshotterService, connectionFactory, schema, dispatcher, clock),
-                new DefaultChangeEventSourceMetricsFactory<>(),
+                new SQLiteChangeEventSourceFactory(connectorConfig, snapshotterService, connectionFactory, schema, dispatcher, clock, streamingMetrics),
+                new SQLiteChangeEventSourceMetricsFactory(streamingMetrics),
                 dispatcher,
                 schema,
                 signalProcessor,

@@ -31,16 +31,19 @@ class SQLiteChangeEventSourceFactory
     private final SQLiteDatabaseSchema schema;
     private final EventDispatcher<SQLitePartition, TableId> dispatcher;
     private final Clock clock;
+    private final SQLiteStreamingChangeEventSourceMetrics streamingMetrics;
 
     SQLiteChangeEventSourceFactory(SQLiteConnectorConfig config, SnapshotterService snapshotterService,
                                    MainConnectionProvidingConnectionFactory<SQLiteConnection> connectionFactory, SQLiteDatabaseSchema schema,
-                                   EventDispatcher<SQLitePartition, TableId> dispatcher, Clock clock) {
+                                   EventDispatcher<SQLitePartition, TableId> dispatcher, Clock clock,
+                                   SQLiteStreamingChangeEventSourceMetrics streamingMetrics) {
         this.config = config;
         this.snapshotterService = snapshotterService;
         this.connectionFactory = connectionFactory;
         this.schema = schema;
         this.dispatcher = dispatcher;
         this.clock = clock;
+        this.streamingMetrics = streamingMetrics;
     }
 
     @Override
@@ -53,6 +56,6 @@ class SQLiteChangeEventSourceFactory
 
     @Override
     public StreamingChangeEventSource<SQLitePartition, SQLiteOffsetContext> getStreamingChangeEventSource() {
-        return new SQLiteStreamingChangeEventSource(config, connectionFactory.mainConnection(), schema);
+        return new SQLiteStreamingChangeEventSource(config, connectionFactory.mainConnection(), schema, dispatcher, clock, streamingMetrics);
     }
 }
