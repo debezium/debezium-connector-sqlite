@@ -21,8 +21,8 @@ import io.debezium.relational.Table;
 import io.debezium.relational.TableId;
 
 /**
- * Unit tests for {@link SQLiteChangeRecordEmitter}'s decode of the {@code _debezium_cdc_log} row JSON
- * into column-ordered value arrays and its mapping of the operation code.
+ * Unit tests for {@link SQLiteChangeRecordEmitter}: decoding the {@code _debezium_cdc_log} row JSON
+ * into column-ordered value arrays, and mapping the operation code.
  */
 class SQLiteChangeRecordEmitterTest {
 

@@ -22,13 +22,9 @@ import io.debezium.util.Clock;
 import io.debezium.util.Metronome;
 
 /**
- * Streams ongoing changes from the SQLite {@code _debezium_cdc_log} table.
- *
- * <p>{@link #execute} runs a bounded poll loop: it reads the next batch of rows after the resume
- * position, dispatches each as a change event, and advances the offset after each row. A full batch is
- * followed immediately by the next poll so a backlog drains without delay; an empty poll sleeps for
- * {@code poll.interval.ms} so an idle connector does not spin. Each poll is a short read, so it does not
- * hold a read transaction across the sleep and block WAL checkpointing.
+ * Streams ongoing changes from the SQLite {@code _debezium_cdc_log} table. {@link #execute} runs a poll
+ * loop: read the next batch after the resume position, dispatch each row, advance the offset per row. A
+ * full batch polls again at once so a backlog drains; an empty poll sleeps for {@code poll.interval.ms}.
  */
 class SQLiteStreamingChangeEventSource
         implements StreamingChangeEventSource<SQLitePartition, SQLiteOffsetContext> {
@@ -56,13 +52,12 @@ class SQLiteStreamingChangeEventSource
     }
 
     /**
-     * Loads the schema and sets the resume point. The offset is null when nothing was stored and no
-     * snapshot ran, as with {@code snapshot.mode=no_data} on a first start; streaming then begins at
-     * the end of the log rather than replaying it.
+     * Loads the schema and sets the resume point. A null offset (nothing stored, no snapshot, as with
+     * {@code snapshot.mode=no_data} on a first start) begins streaming at the log end.
      */
     @Override
     public void init(SQLiteOffsetContext offsetContext) {
-        // Load the schema for the case where the snapshot was skipped and did not load it.
+        // The snapshot-skipped path has not loaded the schema.
         try {
             schema.refresh(connection);
         }
@@ -85,9 +80,8 @@ class SQLiteStreamingChangeEventSource
                         SQLiteOffsetContext offsetContext)
             throws InterruptedException {
         LOGGER.info("Starting SQLite streaming from change_id {}", effectiveOffset.getChangeId());
-        // The snapshot leaves the shared connection in manual-commit mode to hold its read view. Switch
-        // to autocommit so each poll is a fresh short read that sees new commits and lets SQLite
-        // checkpoint the WAL between polls.
+        // The snapshot left the connection in manual-commit mode. Autocommit makes each poll a fresh
+        // short read that sees new commits and lets SQLite checkpoint the WAL between polls.
         enterAutocommit();
         Metronome metronome = Metronome.sleeper(config.getPollInterval(), clock);
 
@@ -126,7 +120,7 @@ class SQLiteStreamingChangeEventSource
     private void dispatch(SQLitePartition partition, CdcLogRow row) throws InterruptedException {
         TableId tableId = tableIdFor(row.tableName());
         Table table = schema.tableFor(tableId);
-        // Advance the offset before dispatch so the enqueued record carries this row as its resume point.
+        // Advance before dispatch so the enqueued record carries this row as its resume point.
         effectiveOffset.setChangeId(row.changeId());
         effectiveOffset.event(tableId, Instant.ofEpochMilli(row.committedAt()));
         SQLiteChangeRecordEmitter emitter = new SQLiteChangeRecordEmitter(partition, effectiveOffset,

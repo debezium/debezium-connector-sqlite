@@ -14,10 +14,8 @@ import org.junit.jupiter.api.Test;
 import io.debezium.jdbc.JdbcConnection;
 
 /**
- * Integration test for {@link SQLiteConnection#readChanges}, the bounded poll query the streaming source
- * runs. It writes several rows through the capture triggers, then reads the {@code _debezium_cdc_log}
- * back with a second connection and checks the cursor, the ascending order, and the batch bound against a
- * real temp database.
+ * Integration test for {@link SQLiteConnection#readChanges}, the bounded poll query. Writes rows
+ * through the capture triggers, then checks the cursor, the ascending order, and the batch bound.
  */
 class SQLiteCdcLogPollIT {
 

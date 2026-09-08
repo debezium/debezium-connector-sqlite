@@ -80,14 +80,9 @@ public class SQLiteConnection extends JdbcConnection {
     }
 
     /**
-     * Reads the next batch of change rows after a cursor position, in {@code change_id} order. Each
-     * call is a short read in autocommit, bounded by {@code limit}, so it does not hold a read
-     * transaction open across the inter-poll sleep and block WAL checkpointing.
-     *
-     * @param afterChangeId the exclusive lower bound; the query returns rows with a larger change_id
-     * @param limit the maximum number of rows to return
-     * @return the matching rows in ascending {@code change_id} order, empty when none remain
-     * @throws SQLException if the query cannot be run
+     * Reads the next batch of change rows after {@code afterChangeId} (exclusive), in {@code change_id}
+     * order, at most {@code limit} rows. Each call is a short autocommit read, so it does not hold a
+     * read transaction open across the inter-poll sleep and block WAL checkpointing.
      */
     public List<CdcLogRow> readChanges(long afterChangeId, int limit) throws SQLException {
         String sql = String.format(

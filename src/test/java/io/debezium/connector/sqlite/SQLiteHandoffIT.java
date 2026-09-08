@@ -22,10 +22,9 @@ import io.debezium.data.Envelope;
 import io.debezium.embedded.async.AbstractAsyncEngineConnectorTest;
 
 /**
- * Integration test for the snapshot-to-streaming handoff, the phase's correctness crux. The snapshot
- * fixes the largest {@code change_id} visible in its read view as the high-water mark, and streaming
- * resumes at the first change past it. A change committed after that mark must be delivered by streaming
- * exactly once and must never appear in the snapshot data, so the handoff has no gaps and no duplicates.
+ * Integration test for the snapshot-to-streaming handoff. The snapshot fixes the largest visible
+ * {@code change_id} as the high-water mark and streaming resumes past it, so a change committed after
+ * the mark is streamed exactly once and never appears in the snapshot data.
  */
 public class SQLiteHandoffIT extends AbstractAsyncEngineConnectorTest {
 
@@ -65,8 +64,7 @@ public class SQLiteHandoffIT extends AbstractAsyncEngineConnectorTest {
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
 
-        // Consuming the snapshot records first guarantees the snapshot has run and fixed the watermark, so
-        // the change written next is unambiguously after it.
+        // Consuming the snapshot records first guarantees the watermark is fixed before the next write.
         List<SourceRecord> snapshotRows = consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".t");
         assertThat(snapshotRows).hasSize(2);
         assertThat(snapshotRows).allSatisfy(record -> assertThat(operation(record)).isEqualTo(Envelope.Operation.READ.code()));
@@ -79,8 +77,7 @@ public class SQLiteHandoffIT extends AbstractAsyncEngineConnectorTest {
         assertThat(streamed).hasSize(1);
 
         SourceRecord change = streamed.get(0);
-        // Delivered once as a create, with the new row, resuming past the watermark. Id 3 was never
-        // snapshotted, so there is no duplicate.
+        // Delivered once as a create; id 3 was never snapshotted, so there is no duplicate.
         assertThat(operation(change)).isEqualTo(Envelope.Operation.CREATE.code());
         assertThat(after(change).getInt64("id")).isEqualTo(3L);
         assertThat(after(change).getString("name")).isEqualTo("c");

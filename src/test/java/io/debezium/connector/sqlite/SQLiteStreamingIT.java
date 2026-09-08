@@ -25,11 +25,9 @@ import io.debezium.embedded.async.AbstractAsyncEngineConnectorTest;
 import io.debezium.junit.logging.LogInterceptor;
 
 /**
- * Integration test for live streaming. With the snapshot skipped so the connector starts at the log end,
- * an insert, update, and delete captured by the triggers must each stream out as the matching {@code c},
- * {@code u}, or {@code d} change event, with the right before and after values, the primary key, a blob
- * round-tripped through the tagged encoding, and a source block carrying the commit time, the change id,
- * and the table name.
+ * Integration test for live streaming. With the snapshot skipped so streaming starts at the log end, an
+ * insert, update, and delete must each stream out as the matching {@code c}, {@code u}, {@code d} event
+ * with the right before and after values, the key, a round-tripped blob, and a populated source block.
  */
 public class SQLiteStreamingIT extends AbstractAsyncEngineConnectorTest {
 
@@ -65,12 +63,12 @@ public class SQLiteStreamingIT extends AbstractAsyncEngineConnectorTest {
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
 
-        // The empty log fixes the resume point at 0. Wait for streaming to start there before writing, so
-        // the writes land past the resume point and stream out rather than being skipped as backlog.
+        // The empty log fixes the resume point at 0. Wait for streaming to start before writing, so the
+        // writes are not skipped as backlog.
         Awaitility.await().atMost(10, TimeUnit.SECONDS)
                 .until(() -> streamingLog.containsMessage("Starting SQLite streaming from change_id 0"));
 
-        // The task installs the triggers at startup, so these writes are captured into the CDC log.
+        // The task installed the triggers at startup, so these writes are captured.
         database.connection().execute("INSERT INTO products (id, name, data) VALUES (1, 'widget', x'0102')");
         database.connection().execute("UPDATE products SET name = 'gadget' WHERE id = 1");
         database.connection().execute("DELETE FROM products WHERE id = 1");
