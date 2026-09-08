@@ -76,12 +76,9 @@ class SQLiteChangeRecordEmitter extends RelationalChangeRecordEmitter<SQLitePart
         return decode(newRowData);
     }
 
-    /**
-     * Decodes one side of the change into an array in {@link Table#columns()} order. A null string is
-     * the absent side of an insert or delete and decodes to an empty array.
-     */
     private Object[] decode(String rowData) {
         if (rowData == null) {
+            // Absent side of an insert or delete.
             return new Object[0];
         }
         Document document = parse(rowData);
@@ -102,16 +99,12 @@ class SQLiteChangeRecordEmitter extends RelationalChangeRecordEmitter<SQLitePart
         }
     }
 
-    /**
-     * Turns a decoded JSON value into the column value. An absent column and a JSON null both yield
-     * Java null. A blob is written as a tagged object {@code {"__dbz_hex__": "<hex>"}}, so a value that
-     * carries the marker is hex-decoded back to its byte array; every other value is read bare.
-     */
     private static Object columnValue(Value value) {
         if (Value.isNull(value)) {
             return null;
         }
         if (value.isDocument()) {
+            // A blob is captured as a tagged {"__dbz_hex__": "<hex>"} object; decode it back to bytes.
             String hex = value.asDocument().getString(CdcLog.BLOB_HEX_MARKER);
             if (hex != null) {
                 return HexConverter.convertFromHex(hex);
