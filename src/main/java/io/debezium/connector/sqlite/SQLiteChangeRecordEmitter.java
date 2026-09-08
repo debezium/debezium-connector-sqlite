@@ -5,10 +5,20 @@
  */
 package io.debezium.connector.sqlite;
 
+import java.io.IOException;
+import java.util.List;
+
+import io.debezium.DebeziumException;
 import io.debezium.data.Envelope;
+import io.debezium.document.Document;
+import io.debezium.document.DocumentReader;
+import io.debezium.document.Value;
 import io.debezium.pipeline.spi.OffsetContext;
+import io.debezium.relational.Column;
 import io.debezium.relational.RelationalChangeRecordEmitter;
+import io.debezium.relational.Table;
 import io.debezium.util.Clock;
+import io.debezium.util.HexConverter;
 
 /**
  * Converts a {@code _debezium_cdc_log} row into a Debezium change record. The snapshot and streaming
@@ -18,18 +28,37 @@ import io.debezium.util.Clock;
 class SQLiteChangeRecordEmitter extends RelationalChangeRecordEmitter<SQLitePartition> {
 
     private final Envelope.Operation operation;
-
-    private final Object rowData;
+    private final Table table;
+    private final String oldRowData;
+    private final String newRowData;
 
     SQLiteChangeRecordEmitter(SQLitePartition partition,
                               OffsetContext offsetContext,
                               Envelope.Operation operation,
-                              Object rowData,
+                              Table table,
+                              String oldRowData,
+                              String newRowData,
                               Clock clock,
                               SQLiteConnectorConfig config) {
         super(partition, offsetContext, clock, config);
         this.operation = operation;
-        this.rowData = rowData;
+        this.table = table;
+        this.oldRowData = oldRowData;
+        this.newRowData = newRowData;
+    }
+
+    /** Maps a {@code _debezium_cdc_log} operation code to the change operation the framework expects. */
+    static Envelope.Operation operationFor(String operationCode) {
+        switch (operationCode) {
+            case CdcLog.OPERATION_CREATE:
+                return Envelope.Operation.CREATE;
+            case CdcLog.OPERATION_UPDATE:
+                return Envelope.Operation.UPDATE;
+            case CdcLog.OPERATION_DELETE:
+                return Envelope.Operation.DELETE;
+            default:
+                throw new DebeziumException("Unknown " + CdcLog.TABLE_NAME + " operation code: " + operationCode);
+        }
     }
 
     @Override
@@ -39,13 +68,48 @@ class SQLiteChangeRecordEmitter extends RelationalChangeRecordEmitter<SQLitePart
 
     @Override
     protected Object[] getOldColumnValues() {
-        // TODO: decode old_row_data JSON into a typed column value array.
-        return new Object[0];
+        return decode(oldRowData);
     }
 
     @Override
     protected Object[] getNewColumnValues() {
-        // TODO: decode new_row_data JSON into a typed column value array.
-        return new Object[0];
+        return decode(newRowData);
+    }
+
+    private Object[] decode(String rowData) {
+        if (rowData == null) {
+            // Absent side of an insert or delete.
+            return new Object[0];
+        }
+        Document document = parse(rowData);
+        List<Column> columns = table.columns();
+        Object[] values = new Object[columns.size()];
+        for (int i = 0; i < columns.size(); i++) {
+            values[i] = columnValue(document.get(columns.get(i).name()));
+        }
+        return values;
+    }
+
+    private Document parse(String rowData) {
+        try {
+            return DocumentReader.defaultReader().read(rowData);
+        }
+        catch (IOException e) {
+            throw new DebeziumException("Failed to parse " + CdcLog.TABLE_NAME + " row JSON: " + rowData, e);
+        }
+    }
+
+    private static Object columnValue(Value value) {
+        if (Value.isNull(value)) {
+            return null;
+        }
+        if (value.isDocument()) {
+            // A blob is captured as a tagged {"__dbz_hex__": "<hex>"} object; decode it back to bytes.
+            String hex = value.asDocument().getString(CdcLog.BLOB_HEX_MARKER);
+            if (hex != null) {
+                return HexConverter.convertFromHex(hex);
+            }
+        }
+        return value.asObject();
     }
 }

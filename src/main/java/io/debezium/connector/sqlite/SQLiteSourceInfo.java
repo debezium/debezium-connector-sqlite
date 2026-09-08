@@ -9,6 +9,7 @@ import java.time.Instant;
 
 import io.debezium.config.CommonConnectorConfig;
 import io.debezium.connector.common.BaseSourceInfo;
+import io.debezium.relational.TableId;
 
 /**
  * Carries the {@code source} metadata block included in every change event. Fields added here must
@@ -16,13 +17,34 @@ import io.debezium.connector.common.BaseSourceInfo;
  */
 public class SQLiteSourceInfo extends BaseSourceInfo {
 
+    static final String CHANGE_ID_KEY = "change_id";
+
+    private Instant timestamp;
+    private String tableName;
+    private long changeId;
+
     public SQLiteSourceInfo(CommonConnectorConfig config) {
         super(config);
     }
 
+    /** Records the change the next event describes. */
+    void setChange(TableId tableId, Instant timestamp, long changeId) {
+        this.tableName = tableId != null ? tableId.table() : null;
+        this.timestamp = timestamp;
+        this.changeId = changeId;
+    }
+
+    String tableName() {
+        return tableName;
+    }
+
+    long changeId() {
+        return changeId;
+    }
+
     @Override
     protected Instant timestamp() {
-        return Instant.now();
+        return timestamp != null ? timestamp : Instant.now();
     }
 
     @Override
