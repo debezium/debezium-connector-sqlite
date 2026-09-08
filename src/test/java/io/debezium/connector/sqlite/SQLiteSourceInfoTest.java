@@ -19,9 +19,8 @@ import io.debezium.connector.AbstractSourceInfo;
 import io.debezium.relational.TableId;
 
 /**
- * Unit tests for the connector-specific fields {@link SQLiteSourceInfo} renders into the
- * {@code source} struct: the source table and the {@code change_id}, the connector's log sequence
- * number.
+ * Unit tests for the connector-specific {@code source} fields {@link SQLiteSourceInfo} renders: the
+ * table name and the {@code change_id}.
  */
 class SQLiteSourceInfoTest {
 
