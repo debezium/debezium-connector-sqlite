@@ -161,21 +161,31 @@ class SQLiteStreamingChangeEventSource
      * Announces each table the reconcile touched: a created or altered table dispatches with its
      * current shape, a dropped table dispatches with the shape it had just before the refresh removed
      * it. No literal DDL is ever available, so {@code ddl} is always null.
+     *
+     * <p>Before each event the source info is re-stamped for the table that changed and with the
+     * current time. SQLite records no position or timestamp for a DDL statement, so the poll loop's
+     * source info still points at the last data row; without this the schema-change event would carry
+     * that row's table and its (possibly long-stale) commit time. The offset's {@code change_id} is
+     * left as the last consumed log position, which is a valid resume point.
      */
     private void dispatchSchemaChangeEvents(SQLitePartition partition, ReconcileResult result, Map<String, Table> tablesBeforeRefresh)
             throws InterruptedException {
+        Instant detectedAt = clock.currentTime();
         for (String table : result.created()) {
             TableId tableId = findTable(table).orElseThrow();
+            effectiveOffset.event(tableId, detectedAt);
             dispatchSchemaChangeEvent(partition, tableId,
                     SchemaChangeEvent.ofCreate(partition, effectiveOffset, config.getLogicalName(), null, null, schema.tableFor(tableId), false));
         }
         for (String table : result.altered()) {
             TableId tableId = findTable(table).orElseThrow();
+            effectiveOffset.event(tableId, detectedAt);
             dispatchSchemaChangeEvent(partition, tableId,
                     SchemaChangeEvent.ofAlter(partition, effectiveOffset, config.getLogicalName(), null, null, schema.tableFor(tableId)));
         }
         for (String table : result.dropped()) {
             Table droppedTable = tablesBeforeRefresh.get(table);
+            effectiveOffset.event(droppedTable.id(), detectedAt);
             dispatchSchemaChangeEvent(partition, droppedTable.id(),
                     SchemaChangeEvent.ofDrop(partition, effectiveOffset, config.getLogicalName(), null, null, droppedTable));
         }
