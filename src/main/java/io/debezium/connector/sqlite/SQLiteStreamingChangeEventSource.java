@@ -232,19 +232,23 @@ class SQLiteStreamingChangeEventSource
     private void dispatchSchemaChangeEvents(SQLitePartition partition, ReconcileResult result,
                                             Map<TableId, Table> emitted, Tables database)
             throws InterruptedException {
+        Instant detectedAt = clock.currentTime();
         for (String table : result.created()) {
             TableId tableId = findTable(table).orElseThrow();
+            effectiveOffset.event(tableId, detectedAt);
             dispatchSchemaChangeEvent(partition, tableId,
                     SchemaChangeEvent.ofCreate(partition, effectiveOffset, config.getLogicalName(), null, null, database.forTable(tableId), false));
         }
         for (String table : result.altered()) {
             TableId tableId = findTable(table).orElseThrow();
+            effectiveOffset.event(tableId, detectedAt);
             dispatchSchemaChangeEvent(partition, tableId,
                     SchemaChangeEvent.ofAlter(partition, effectiveOffset, config.getLogicalName(), null, null, database.forTable(tableId)));
         }
         for (String table : result.dropped()) {
             Table droppedTable = emitted.values().stream()
                     .filter(t -> t.id().table().equals(table)).findFirst().orElseThrow();
+            effectiveOffset.event(droppedTable.id(), detectedAt);
             dispatchSchemaChangeEvent(partition, droppedTable.id(),
                     SchemaChangeEvent.ofDrop(partition, effectiveOffset, config.getLogicalName(), null, null, droppedTable));
         }

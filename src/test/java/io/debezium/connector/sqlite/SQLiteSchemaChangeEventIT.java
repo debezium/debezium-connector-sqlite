@@ -137,6 +137,23 @@ public class SQLiteSchemaChangeEventIT extends AbstractAsyncEngineConnectorTest 
         assertThat(records.allRecordsInOrder()).containsExactly(schemaChange, dataChange);
     }
 
+    @Test
+    public void shouldStampTheChangedTableOnTheSchemaChangeEventSource() throws Exception {
+        database.connection().execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, name TEXT)");
+        database.installTriggers("orders");
+        startStreaming();
+
+        // A data change streams first, so the source info now points at 'orders' and that row's commit time.
+        database.connection().execute("INSERT INTO orders (id, name) VALUES (1, 'a')");
+        consumeRecordsByTopic(1, false);
+
+        // A DDL on a different table must carry that table on its source, not the stale 'orders'.
+        database.connection().execute("CREATE TABLE audit (id INTEGER PRIMARY KEY, note TEXT)");
+
+        Struct value = awaitSchemaChangeEvent();
+        assertThat(value.getStruct("source").getString("table")).isEqualTo("audit");
+    }
+
     private void startStreaming() throws Exception {
         LogInterceptor streamingLog = new LogInterceptor(SQLiteStreamingChangeEventSource.class);
         Configuration config = Configuration.create()
