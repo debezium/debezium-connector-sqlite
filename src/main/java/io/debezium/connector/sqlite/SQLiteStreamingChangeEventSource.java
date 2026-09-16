@@ -44,7 +44,6 @@ class SQLiteStreamingChangeEventSource
 
     private SQLiteOffsetContext effectiveOffset;
 
-    /** The {@code schema_version} seen at the last reconcile; null until the first poll seeds it. */
     private Long lastSchemaVersion;
 
     SQLiteStreamingChangeEventSource(SQLiteConnectorConfig config,
@@ -111,11 +110,9 @@ class SQLiteStreamingChangeEventSource
     }
 
     /**
-     * Reconciles the capture triggers when {@code schema_version} has moved since the last check, so a
-     * schema change made while streaming is picked up before the next batch. The first poll always
-     * reconciles, which also catches a change made between startup and the start of streaming, such as
-     * during the snapshot. A bump with no relevant change, for example a {@code CREATE INDEX}, reconciles
-     * to a no-op.
+     * Reconciles the capture triggers when {@code schema_version} has moved since the last check, picking
+     * up a schema change made while streaming. The first poll always reconciles, catching a change made
+     * during the snapshot; an irrelevant bump such as {@code CREATE INDEX} reconciles to a no-op.
      */
     private void reconcileIfSchemaChanged() {
         long current = readSchemaVersion();
@@ -185,9 +182,8 @@ class SQLiteStreamingChangeEventSource
 
     /**
      * Resolves a change row's table name to a {@link TableId}. A row can name a table the loaded schema
-     * does not have when a {@code CREATE} or {@code RENAME} happened that this poll has not caught yet, so
-     * it reconciles once, if the schema has moved since the last reconcile, and looks again. An empty
-     * result means the table is gone, renamed away or dropped, and the caller skips the row.
+     * does not have yet when a {@code CREATE} or {@code RENAME} this poll has not caught, so it reconciles
+     * once if the schema has moved and looks again. Empty means the table is gone and the caller skips it.
      */
     private Optional<TableId> resolveTable(String tableName) {
         Optional<TableId> found = findTable(tableName);

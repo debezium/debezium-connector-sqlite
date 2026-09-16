@@ -84,13 +84,10 @@ class SQLiteChangeRecordEmitter extends RelationalChangeRecordEmitter<SQLitePart
     }
 
     /**
-     * Decodes one side of the change into an array in {@link Table#columns()} order. A null string is
-     * the absent side of an insert or delete and decodes to an empty array.
-     *
-     * <p>A column the current schema has but the captured JSON does not carry means the capture trigger
-     * was stale when the row was written, from an {@code ALTER TABLE} that raced the trigger rebuild. The
-     * value was never captured, so it is emitted as null and, when this is the row's present side, a
-     * warning names the columns so the loss is visible.
+     * Decodes one side of the change into an array in {@link Table#columns()} order; a null string is the
+     * absent side of an insert or delete and decodes to an empty array. A column the schema has but the
+     * captured JSON lacks means the trigger was stale when the row was written, so the value is emitted as
+     * null and, when this is the row's present side, a warning names the columns.
      */
     private Object[] decode(String rowData, boolean warnOnStaleCapture) {
         if (rowData == null) {

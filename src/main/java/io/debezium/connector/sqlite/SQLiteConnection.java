@@ -110,11 +110,10 @@ public class SQLiteConnection extends JdbcConnection {
     }
 
     /**
-     * Returns the database's {@code schema_version}, the header counter SQLite increments on every DDL
-     * statement. Streaming reads it at the top of each poll and re-reads the schema when it has risen,
-     * which is the only cross-connection signal that the schema changed. It moves for any DDL, including
-     * ones that touch no monitored table, so a change in the value is a prompt to look, not proof that a
-     * monitored table changed.
+     * Returns the database's {@code schema_version}, the header counter SQLite bumps on every DDL
+     * statement. Streaming re-reads the schema when it rises, the only cross-connection signal that the
+     * schema changed. It moves for any DDL, so a change is a prompt to look, not proof a monitored table
+     * changed.
      */
     public long readSchemaVersion() throws SQLException {
         return queryAndMap("PRAGMA schema_version", rs -> rs.next() ? rs.getLong(1) : 0L);
@@ -122,10 +121,8 @@ public class SQLiteConnection extends JdbcConnection {
 
     /**
      * Reads the CDC capture triggers the connector installed, as a name-to-SQL map. It returns only
-     * triggers whose name carries the connector's prefix, so a user's own triggers are left out, and it
-     * reads all of them in one query so the reconcile can both compare a table's triggers and find
-     * orphaned ones. The SQL is the text SQLite stored, which it keeps verbatim except that it strips
-     * {@code IF NOT EXISTS}.
+     * connector-prefixed triggers, in one query, so the reconcile can compare a table's triggers and find
+     * orphaned ones. The SQL is the text SQLite stored, verbatim except that it strips {@code IF NOT EXISTS}.
      */
     public Map<String, String> readConnectorTriggerSql() throws SQLException {
         return queryAndMap("SELECT name, sql FROM sqlite_master WHERE type='trigger'", rs -> {
