@@ -116,10 +116,8 @@ public class SQLiteConnectorTask extends BaseSourceTask<SQLitePartition, SQLiteO
         }
 
         // Reconcile the capture triggers against the current schema before the coordinator starts, so any
-        // write from this point on is logged with a change_id and the snapshot-to-streaming handoff stays
-        // consistent. On a fresh table this installs the triggers; on a table whose columns changed while
-        // the connector was down it rebuilds them, so a trigger left stale by a schema change never leaves
-        // the table unwritable once the connector is back up.
+        // write from now on is logged and the handoff stays consistent. This installs triggers on a fresh
+        // table and rebuilds them on a table whose columns changed while the connector was down.
         try {
             TriggerReconciler.reconcile(connection, schema);
         }

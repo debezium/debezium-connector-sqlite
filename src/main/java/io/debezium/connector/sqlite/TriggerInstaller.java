@@ -44,15 +44,10 @@ public final class TriggerInstaller {
     }
 
     /**
-     * Rebuilds a table's triggers to match its current columns. It drops the three triggers and creates
-     * them again from the live column list, so a trigger left stale by an {@code ALTER TABLE} is
-     * replaced. A plain {@link #install} cannot do this: {@code CREATE TRIGGER IF NOT EXISTS} is a no-op
-     * against a trigger that already exists, so the drop is required. The drop and the create run in one
-     * transaction, so no write is captured by a missing trigger in between.
-     *
-     * @param connection an open connection to the SQLite database
-     * @param table the source table whose triggers to rebuild; it must already exist
-     * @throws SQLException if the columns cannot be read or the triggers cannot be replaced
+     * Rebuilds a table's triggers to match its current columns, dropping the three and creating them again
+     * so a trigger left stale by an {@code ALTER TABLE} is replaced. {@code CREATE TRIGGER IF NOT EXISTS}
+     * alone cannot, so the drop is required; both run in one transaction, so no write is captured by a
+     * missing trigger in between.
      */
     public static void rebuild(JdbcConnection connection, String table) throws SQLException {
         List<String> columns = readColumnNames(connection, table);
@@ -62,19 +57,14 @@ public final class TriggerInstaller {
     }
 
     /**
-     * Drops a table's three capture triggers if they exist. Used to remove triggers left behind for a
-     * table the connector no longer captures, such as after an {@code ALTER TABLE ... RENAME TO}, where
-     * the renamed table keeps its old triggers and they would otherwise keep firing.
-     *
-     * @param connection an open connection to the SQLite database
-     * @param table the source table whose triggers to drop
-     * @throws SQLException if the triggers cannot be dropped
+     * Drops a table's three capture triggers if they exist, to remove triggers left on a table the
+     * connector no longer captures, such as after an {@code ALTER TABLE ... RENAME TO} where the renamed
+     * table keeps its old triggers and they would otherwise keep firing.
      */
     public static void drop(JdbcConnection connection, String table) throws SQLException {
         connection.execute(TriggerGenerator.dropTriggers(table).toArray(new String[0]));
     }
 
-    /** Runs the statements in a single transaction, restoring the connection's autocommit mode after. */
     private static void runInTransaction(JdbcConnection connection, List<String> statements) throws SQLException {
         Connection jdbc = connection.connection();
         boolean autoCommit = jdbc.getAutoCommit();
@@ -94,7 +84,6 @@ public final class TriggerInstaller {
         }
     }
 
-    /** Reads a table's column names in definition order from {@code PRAGMA table_info}. */
     static List<String> readColumnNames(JdbcConnection connection, String table) throws SQLException {
         return connection.queryAndMap("PRAGMA table_info(" + table + ")", rs -> {
             List<String> names = new ArrayList<>();
