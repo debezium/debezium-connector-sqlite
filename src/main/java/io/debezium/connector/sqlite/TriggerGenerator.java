@@ -7,6 +7,7 @@ package io.debezium.connector.sqlite;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -17,7 +18,9 @@ import java.util.stream.Collectors;
  */
 public final class TriggerGenerator {
 
-    private static final String TRIGGER_PREFIX = "_debezium_cdc_";
+    static final String TRIGGER_PREFIX = "_debezium_cdc_";
+
+    private static final List<String> TRIGGER_SUFFIXES = List.of("insert", "update", "delete");
 
     /**
      * Columns per {@code json_object} call. It accepts at most 127 arguments, so 63 columns; a wider
@@ -48,6 +51,37 @@ public final class TriggerGenerator {
                 trigger(tableName, "delete", "DELETE", CdcLog.OPERATION_DELETE, oldRow, "NULL"));
     }
 
+    static String triggerName(String tableName, String suffix) {
+        return TRIGGER_PREFIX + tableName + "_" + suffix;
+    }
+
+    public static List<String> dropTriggers(String tableName) {
+        return TRIGGER_SUFFIXES.stream()
+                .map(suffix -> "DROP TRIGGER IF EXISTS " + triggerName(tableName, suffix))
+                .collect(Collectors.toList());
+    }
+
+    static List<String> triggerNames(String tableName) {
+        return TRIGGER_SUFFIXES.stream()
+                .map(suffix -> triggerName(tableName, suffix))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * The table name a generated trigger name belongs to, the inverse of {@link #triggerName}. Empty if
+     * the name does not match the connector's naming scheme.
+     */
+    static Optional<String> tableNameFor(String triggerName) {
+        if (!triggerName.startsWith(TRIGGER_PREFIX)) {
+            return Optional.empty();
+        }
+        String withoutPrefix = triggerName.substring(TRIGGER_PREFIX.length());
+        return TRIGGER_SUFFIXES.stream()
+                .filter(suffix -> withoutPrefix.endsWith("_" + suffix))
+                .findFirst()
+                .map(suffix -> withoutPrefix.substring(0, withoutPrefix.length() - suffix.length() - 1));
+    }
+
     private static String trigger(String tableName, String suffix, String timing,
                                   String operation, String oldData, String newData) {
         return String.format("""
@@ -57,7 +91,7 @@ public final class TriggerGenerator {
                     INSERT INTO %s (%s)
                     VALUES ('%s', '%s', %s, %s, %s);
                 END""",
-                TRIGGER_PREFIX + tableName + "_" + suffix,
+                triggerName(tableName, suffix),
                 timing,
                 tableName,
                 CdcLog.TABLE_NAME,
