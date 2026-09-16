@@ -5,7 +5,9 @@
  */
 package io.debezium.connector.sqlite;
 
+import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -41,7 +43,48 @@ public final class TriggerInstaller {
         connection.execute(TriggerGenerator.createTriggers(table, columns).toArray(new String[0]));
     }
 
-    private static List<String> readColumnNames(JdbcConnection connection, String table) throws SQLException {
+    /**
+     * Rebuilds a table's triggers to match its current columns, dropping the three and creating them again
+     * so a trigger left stale by an {@code ALTER TABLE} is replaced. {@code CREATE TRIGGER IF NOT EXISTS}
+     * alone cannot, so the drop is required; both run in one transaction, so no write is captured by a
+     * missing trigger in between.
+     */
+    public static void rebuild(JdbcConnection connection, String table) throws SQLException {
+        List<String> columns = readColumnNames(connection, table);
+        List<String> statements = new ArrayList<>(TriggerGenerator.dropTriggers(table));
+        statements.addAll(TriggerGenerator.createTriggers(table, columns));
+        runInTransaction(connection, statements);
+    }
+
+    /**
+     * Drops a table's three capture triggers if they exist, to remove triggers left on a table the
+     * connector no longer captures, such as after an {@code ALTER TABLE ... RENAME TO} where the renamed
+     * table keeps its old triggers and they would otherwise keep firing.
+     */
+    public static void drop(JdbcConnection connection, String table) throws SQLException {
+        connection.execute(TriggerGenerator.dropTriggers(table).toArray(new String[0]));
+    }
+
+    private static void runInTransaction(JdbcConnection connection, List<String> statements) throws SQLException {
+        Connection jdbc = connection.connection();
+        boolean autoCommit = jdbc.getAutoCommit();
+        jdbc.setAutoCommit(false);
+        try (Statement statement = jdbc.createStatement()) {
+            for (String sql : statements) {
+                statement.execute(sql);
+            }
+            jdbc.commit();
+        }
+        catch (SQLException e) {
+            jdbc.rollback();
+            throw e;
+        }
+        finally {
+            jdbc.setAutoCommit(autoCommit);
+        }
+    }
+
+    static List<String> readColumnNames(JdbcConnection connection, String table) throws SQLException {
         return connection.queryAndMap("PRAGMA table_info(" + table + ")", rs -> {
             List<String> names = new ArrayList<>();
             while (rs.next()) {
