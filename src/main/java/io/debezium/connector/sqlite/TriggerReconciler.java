@@ -18,10 +18,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.debezium.relational.TableId;
+import io.debezium.relational.Tables.TableFilter;
 
 /**
  * Brings the installed capture triggers back in step with the current schema. The trigger SQL is a pure
- * function of a table's name and columns, so for each monitored table the reconciler regenerates the SQL
+ * function of a table's name and columns, so for each captured table the reconciler regenerates the SQL
  * and rebuilds where it differs from what is installed, covering a column added, dropped, or renamed and
  * triggers missing entirely. It also drops connector triggers left on a renamed table, which would
  * otherwise capture every write twice.
@@ -34,14 +35,19 @@ public final class TriggerReconciler {
     }
 
     /**
-     * Rebuilds the triggers of every monitored table whose installed triggers no longer match its
-     * columns, and returns the names of the tables rebuilt.
+     * Rebuilds the triggers of every captured table whose installed triggers no longer match its
+     * columns, and returns the names of the tables rebuilt. The table set is read from the database and
+     * filtered, not taken from the connector schema, so it reflects the tables that exist right now rather
+     * than the schema the streaming loop currently emits against.
      */
-    public static List<String> reconcile(SQLiteConnection connection, SQLiteDatabaseSchema schema) throws SQLException {
+    public static List<String> reconcile(SQLiteConnection connection, TableFilter tableFilter) throws SQLException {
         Map<String, String> installed = connection.readConnectorTriggerSql();
         Set<String> monitoredTables = new LinkedHashSet<>();
         List<String> rebuilt = new ArrayList<>();
-        for (TableId tableId : schema.tableIds()) {
+        for (TableId tableId : connection.getAllTableIds(null)) {
+            if (!tableFilter.isIncluded(tableId)) {
+                continue;
+            }
             String table = tableId.table();
             monitoredTables.add(table);
             List<String> columns = TriggerInstaller.readColumnNames(connection, table);
