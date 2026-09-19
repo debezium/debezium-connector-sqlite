@@ -128,7 +128,7 @@ class SQLiteStreamingChangeEventSource
     private void reconcileNow() {
         try {
             schema.refresh(connection);
-            TriggerReconciler.reconcile(connection, schema);
+            TriggerReconciler.reconcile(connection, config.getTableFilters().dataCollectionFilter());
         }
         catch (SQLException e) {
             throw new DebeziumException("Failed to reconcile capture triggers after a schema change", e);
