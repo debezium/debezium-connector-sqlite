@@ -197,6 +197,47 @@ public class SQLiteSchemaChangeIT extends AbstractAsyncEngineConnectorTest {
     }
 
     @Test
+    public void shouldRenderABacklogRowAgainstTheShapeThatCapturedIt() throws Exception {
+        LogInterceptor streamingLog = new LogInterceptor(SQLiteStreamingChangeEventSource.class);
+        LogInterceptor emitterLog = new LogInterceptor(SQLiteChangeRecordEmitter.class);
+
+        database.connection().execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, name TEXT)");
+        database.installTriggers("orders");
+
+        Configuration config = Configuration.create()
+                .with(SQLiteConnectorConfig.DATABASE_FILE, database.databaseFile().toString())
+                .with(CommonConnectorConfig.TOPIC_PREFIX, TOPIC_PREFIX)
+                .with(SQLiteConnectorConfig.SNAPSHOT_MODE, "no_data")
+                .build();
+
+        start(SQLiteSourceConnector.class, config);
+        assertConnectorIsRunning();
+        Awaitility.await().atMost(10, TimeUnit.SECONDS)
+                .until(() -> streamingLog.containsMessage("Starting SQLite streaming from change_id 0"));
+
+        // The write and the column add commit together, so the row is backlogged under the old shape when
+        // the add is reconciled. It must render with the columns it was captured with, not gain a null
+        // 'note' the trigger never wrote.
+        Connection jdbc = database.connection().connection();
+        jdbc.setAutoCommit(false);
+        try (Statement statement = jdbc.createStatement()) {
+            statement.execute("INSERT INTO orders (id, name) VALUES (1, 'a')");
+            statement.execute("ALTER TABLE orders ADD COLUMN note TEXT");
+            jdbc.commit();
+        }
+        finally {
+            jdbc.setAutoCommit(true);
+        }
+
+        List<SourceRecord> records = consumeRecordsByTopic(1, false).recordsForTopic(TOPIC_PREFIX + ".orders");
+        assertThat(records).hasSize(1);
+        Struct after = after(records.get(0));
+        assertThat(after.getString("name")).isEqualTo("a");
+        assertThat(after.schema().field("note")).isNull();
+        assertThat(emitterLog.containsMessage("is missing column(s)")).isFalse();
+    }
+
+    @Test
     public void shouldNotRebuildTriggersForAnUnrelatedSchemaChange() throws Exception {
         LogInterceptor streamingLog = new LogInterceptor(SQLiteStreamingChangeEventSource.class);
         LogInterceptor reconcileLog = new LogInterceptor(TriggerReconciler.class);
