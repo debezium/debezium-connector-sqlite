@@ -25,6 +25,8 @@ import io.debezium.data.Envelope;
 import io.debezium.embedded.async.AbstractAsyncEngineConnectorTest;
 import io.debezium.junit.logging.LogInterceptor;
 
+import ch.qos.logback.classic.Level;
+
 /**
  * Integration tests for keeping the capture triggers in step with the schema. A column added under an
  * installed trigger is not captured until the trigger is rebuilt from the new column list, and these
@@ -116,6 +118,43 @@ public class SQLiteSchemaChangeIT extends AbstractAsyncEngineConnectorTest {
         List<SourceRecord> records = consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".orders");
         assertThat(records).hasSize(2);
         assertThat(after(records.get(1)).getString("note")).isEqualTo("hello");
+    }
+
+    @Test
+    public void shouldNotReconcileAgainForItsOwnTriggerRebuild() throws Exception {
+        LogInterceptor streamingLog = new LogInterceptor(SQLiteStreamingChangeEventSource.class);
+        streamingLog.setLoggerLevel(SQLiteStreamingChangeEventSource.class, Level.DEBUG);
+        LogInterceptor reconcileLog = new LogInterceptor(TriggerReconciler.class);
+
+        database.connection().execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, name TEXT)");
+        database.installTriggers("orders");
+
+        Configuration config = Configuration.create()
+                .with(SQLiteConnectorConfig.DATABASE_FILE, database.databaseFile().toString())
+                .with(CommonConnectorConfig.TOPIC_PREFIX, TOPIC_PREFIX)
+                .with(SQLiteConnectorConfig.SNAPSHOT_MODE, "no_data")
+                .build();
+
+        start(SQLiteSourceConnector.class, config);
+        assertConnectorIsRunning();
+        Awaitility.await().atMost(10, TimeUnit.SECONDS)
+                .until(() -> streamingLog.containsMessage("Starting SQLite streaming from change_id 0"));
+
+        // One schema change drives one reconcile, whose own DROP/CREATE TRIGGER statements bump
+        // schema_version again. The poll loop must record the settled version, not the pre-reconcile one,
+        // or it reads its own bump as a fresh change and reconciles a second, redundant time.
+        database.connection().execute("ALTER TABLE orders ADD COLUMN note TEXT");
+        Awaitility.await().atMost(10, TimeUnit.SECONDS)
+                .until(() -> reconcileLog.containsMessage("Rebuilt the capture triggers for table 'orders'"));
+
+        // Two writes drained one after the other force at least one more poll iteration past the reconcile,
+        // so a redundant reconcile would already have run and been logged before the assertion.
+        database.connection().execute("INSERT INTO orders (id, name, note) VALUES (1, 'a', 'x')");
+        consumeRecordsByTopic(1, false);
+        database.connection().execute("INSERT INTO orders (id, name, note) VALUES (2, 'b', 'y')");
+        consumeRecordsByTopic(1, false);
+
+        assertThat(streamingLog.countOccurrences("reconciling capture triggers")).isEqualTo(1);
     }
 
     @Test

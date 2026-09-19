@@ -121,11 +121,11 @@ class SQLiteStreamingChangeEventSource
                 LOGGER.debug("SQLite schema_version changed from {} to {}; reconciling capture triggers",
                         lastSchemaVersion, current);
             }
-            reconcileNow(current);
+            reconcileNow();
         }
     }
 
-    private void reconcileNow(long schemaVersion) {
+    private void reconcileNow() {
         try {
             schema.refresh(connection);
             TriggerReconciler.reconcile(connection, schema);
@@ -133,7 +133,10 @@ class SQLiteStreamingChangeEventSource
         catch (SQLException e) {
             throw new DebeziumException("Failed to reconcile capture triggers after a schema change", e);
         }
-        lastSchemaVersion = schemaVersion;
+        // The reconcile's own DROP/CREATE TRIGGER statements bump schema_version, so read it back
+        // afterward. Recording the pre-reconcile value would leave lastSchemaVersion stale and force a
+        // redundant no-op reconcile on the next poll.
+        lastSchemaVersion = readSchemaVersion();
     }
 
     private long readSchemaVersion() {
@@ -192,7 +195,7 @@ class SQLiteStreamingChangeEventSource
         }
         long current = readSchemaVersion();
         if (lastSchemaVersion == null || current != lastSchemaVersion) {
-            reconcileNow(current);
+            reconcileNow();
             found = findTable(tableName);
         }
         return found;
