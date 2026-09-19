@@ -11,8 +11,10 @@ import java.util.List;
 import io.debezium.connector.common.CdcSourceTaskContext;
 import io.debezium.relational.CustomConverterRegistry;
 import io.debezium.relational.RelationalDatabaseSchema;
+import io.debezium.relational.Table;
 import io.debezium.relational.TableId;
 import io.debezium.relational.TableSchemaBuilder;
+import io.debezium.relational.Tables;
 import io.debezium.spi.topic.TopicNamingStrategy;
 
 /**
@@ -52,5 +54,33 @@ public class SQLiteDatabaseSchema extends RelationalDatabaseSchema {
     public void refresh(SQLiteConnection connection) throws SQLException {
         connection.readSchema(tables(), null, null, getTableFilter(), null, true);
         tableIds().forEach(this::refreshSchema);
+    }
+
+    /**
+     * Reads the tables that currently exist in the database, filtered, into a fresh {@link Tables} without
+     * changing the shapes this schema emits against. The streaming loop diffs this against the emitted
+     * shapes to decide which shape swaps to defer until streaming drains past the change_id where the
+     * schema changed.
+     *
+     * @param connection an open connection to the database file
+     * @return the tables that currently exist in the database
+     * @throws SQLException if the schema cannot be read
+     */
+    public Tables readDatabaseTables(SQLiteConnection connection) throws SQLException {
+        Tables current = new Tables();
+        connection.readSchema(current, null, null, getTableFilter(), null, true);
+        return current;
+    }
+
+    /** Registers {@code table} as the shape emitted for its id, replacing any shape already registered. */
+    public void registerTable(Table table) {
+        tables().overwriteTable(table);
+        buildAndRegisterSchema(table);
+    }
+
+    /** Removes {@code id} from the emitted schema, so it is no longer tracked or emitted. */
+    public void evictTable(TableId id) {
+        removeSchema(id);
+        tables().removeTable(id);
     }
 }
