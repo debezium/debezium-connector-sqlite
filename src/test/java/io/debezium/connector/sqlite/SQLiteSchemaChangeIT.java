@@ -238,6 +238,57 @@ public class SQLiteSchemaChangeIT extends AbstractAsyncEngineConnectorTest {
     }
 
     @Test
+    public void shouldRenderOldAndNewRowsCorrectlyWhenATableIsDroppedAndRecreatedWithTheSameName() throws Exception {
+        LogInterceptor streamingLog = new LogInterceptor(SQLiteStreamingChangeEventSource.class);
+        LogInterceptor reconcileLog = new LogInterceptor(TriggerReconciler.class);
+
+        database.connection().execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, name TEXT)");
+        database.installTriggers("orders");
+
+        Configuration config = Configuration.create()
+                .with(SQLiteConnectorConfig.DATABASE_FILE, database.databaseFile().toString())
+                .with(CommonConnectorConfig.TOPIC_PREFIX, TOPIC_PREFIX)
+                .with(SQLiteConnectorConfig.SNAPSHOT_MODE, "no_data")
+                .build();
+
+        start(SQLiteSourceConnector.class, config);
+        assertConnectorIsRunning();
+        Awaitility.await().atMost(10, TimeUnit.SECONDS)
+                .until(() -> streamingLog.containsMessage("Starting SQLite streaming from change_id 0"));
+
+        // A row under the old shape, then the table dropped and recreated with a different shape, all at
+        // once. The two shapes share a name and a table id, so the backlogged row and the new table's rows
+        // must still each render against their own shape, one after the other along the change_id.
+        Connection jdbc = database.connection().connection();
+        jdbc.setAutoCommit(false);
+        try (Statement statement = jdbc.createStatement()) {
+            statement.execute("INSERT INTO orders (id, name) VALUES (1, 'a')");
+            statement.execute("DROP TABLE orders");
+            statement.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, name TEXT, extra TEXT)");
+            jdbc.commit();
+        }
+        finally {
+            jdbc.setAutoCommit(true);
+        }
+
+        // The backlogged row renders under the original two-column shape.
+        List<SourceRecord> oldRows = consumeRecordsByTopic(1, false).recordsForTopic(TOPIC_PREFIX + ".orders");
+        assertThat(oldRows).hasSize(1);
+        assertThat(after(oldRows.get(0)).getString("name")).isEqualTo("a");
+        assertThat(after(oldRows.get(0)).schema().field("extra")).isNull();
+
+        // The reconcile has installed triggers on the recreated table, so a later write is captured and
+        // renders under the new three-column shape.
+        Awaitility.await().atMost(10, TimeUnit.SECONDS)
+                .until(() -> reconcileLog.containsMessage("Rebuilt the capture triggers for table 'orders'"));
+        database.connection().execute("INSERT INTO orders (id, name, extra) VALUES (2, 'b', 'x')");
+
+        List<SourceRecord> newRows = consumeRecordsByTopic(1, false).recordsForTopic(TOPIC_PREFIX + ".orders");
+        assertThat(newRows).hasSize(1);
+        assertThat(after(newRows.get(0)).getString("extra")).isEqualTo("x");
+    }
+
+    @Test
     public void shouldNotRebuildTriggersForAnUnrelatedSchemaChange() throws Exception {
         LogInterceptor streamingLog = new LogInterceptor(SQLiteStreamingChangeEventSource.class);
         LogInterceptor reconcileLog = new LogInterceptor(TriggerReconciler.class);
