@@ -8,7 +8,9 @@ package io.debezium.connector.sqlite;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -105,6 +107,34 @@ public class SQLiteConnection extends JdbcConnection {
                     }
                     return rows;
                 });
+    }
+
+    /**
+     * Returns the database's {@code schema_version}, the header counter SQLite bumps on every DDL
+     * statement. Streaming re-reads the schema when it rises, the only cross-connection signal that the
+     * schema changed. It moves for any DDL, so a change is a prompt to look, not proof a monitored table
+     * changed.
+     */
+    public long readSchemaVersion() throws SQLException {
+        return queryAndMap("PRAGMA schema_version", rs -> rs.next() ? rs.getLong(1) : 0L);
+    }
+
+    /**
+     * Reads the CDC capture triggers the connector installed, as a name-to-SQL map. It returns only
+     * connector-prefixed triggers, in one query, so the reconcile can compare a table's triggers and find
+     * orphaned ones. The SQL is the text SQLite stored, verbatim except that it strips {@code IF NOT EXISTS}.
+     */
+    public Map<String, String> readConnectorTriggerSql() throws SQLException {
+        return queryAndMap("SELECT name, sql FROM sqlite_master WHERE type='trigger'", rs -> {
+            Map<String, String> triggers = new LinkedHashMap<>();
+            while (rs.next()) {
+                String name = rs.getString(1);
+                if (name.startsWith(TriggerGenerator.TRIGGER_PREFIX)) {
+                    triggers.put(name, rs.getString(2));
+                }
+            }
+            return triggers;
+        });
     }
 
     /**

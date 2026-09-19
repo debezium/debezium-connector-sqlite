@@ -17,7 +17,9 @@ import java.util.stream.Collectors;
  */
 public final class TriggerGenerator {
 
-    private static final String TRIGGER_PREFIX = "_debezium_cdc_";
+    static final String TRIGGER_PREFIX = "_debezium_cdc_";
+
+    private static final List<String> TRIGGER_SUFFIXES = List.of("insert", "update", "delete");
 
     /**
      * Columns per {@code json_object} call. It accepts at most 127 arguments, so 63 columns; a wider
@@ -48,6 +50,22 @@ public final class TriggerGenerator {
                 trigger(tableName, "delete", "DELETE", CdcLog.OPERATION_DELETE, oldRow, "NULL"));
     }
 
+    static String triggerName(String tableName, String suffix) {
+        return TRIGGER_PREFIX + tableName + "_" + suffix;
+    }
+
+    public static List<String> dropTriggers(String tableName) {
+        return TRIGGER_SUFFIXES.stream()
+                .map(suffix -> "DROP TRIGGER IF EXISTS " + triggerName(tableName, suffix))
+                .collect(Collectors.toList());
+    }
+
+    static List<String> triggerNames(String tableName) {
+        return TRIGGER_SUFFIXES.stream()
+                .map(suffix -> triggerName(tableName, suffix))
+                .collect(Collectors.toList());
+    }
+
     private static String trigger(String tableName, String suffix, String timing,
                                   String operation, String oldData, String newData) {
         return String.format("""
@@ -57,7 +75,7 @@ public final class TriggerGenerator {
                     INSERT INTO %s (%s)
                     VALUES ('%s', '%s', %s, %s, %s);
                 END""",
-                TRIGGER_PREFIX + tableName + "_" + suffix,
+                triggerName(tableName, suffix),
                 timing,
                 tableName,
                 CdcLog.TABLE_NAME,
