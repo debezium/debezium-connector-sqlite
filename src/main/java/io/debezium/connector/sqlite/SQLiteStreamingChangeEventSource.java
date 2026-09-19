@@ -137,9 +137,8 @@ class SQLiteStreamingChangeEventSource
     private void reconcileNow() {
         try {
             Map<TableId, Table> emitted = currentShapes();
-            TriggerReconciler.reconcile(connection, config.getTableFilters().dataCollectionFilter());
-            // Every row up to here was captured under the old triggers; rows after it under the rebuilt ones.
             long boundary = connection.readMaxChangeId();
+            TriggerReconciler.reconcile(connection, config.getTableFilters().dataCollectionFilter());
             deferShapeChanges(emitted, schema.readDatabaseTables(connection), boundary);
         }
         catch (SQLException e) {
