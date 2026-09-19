@@ -7,7 +7,11 @@ package io.debezium.connector.sqlite;
 
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.slf4j.Logger;
@@ -21,6 +25,7 @@ import io.debezium.pipeline.source.spi.ChangeEventSource.ChangeEventSourceContex
 import io.debezium.pipeline.source.spi.StreamingChangeEventSource;
 import io.debezium.relational.Table;
 import io.debezium.relational.TableId;
+import io.debezium.relational.Tables;
 import io.debezium.util.Clock;
 import io.debezium.util.Metronome;
 
@@ -45,6 +50,10 @@ class SQLiteStreamingChangeEventSource
     private SQLiteOffsetContext effectiveOffset;
 
     private Long lastSchemaVersion;
+
+    // Shape changes wait here until streaming drains past the change_id at which the schema changed, so a
+    // backlogged row is still rendered against the shape that captured it rather than the newer one.
+    private final List<PendingSwap> pendingSwaps = new ArrayList<>();
 
     SQLiteStreamingChangeEventSource(SQLiteConnectorConfig config,
                                      SQLiteConnection connection,
@@ -127,8 +136,11 @@ class SQLiteStreamingChangeEventSource
 
     private void reconcileNow() {
         try {
-            schema.refresh(connection);
+            Map<TableId, Table> emitted = currentShapes();
             TriggerReconciler.reconcile(connection, config.getTableFilters().dataCollectionFilter());
+            // Every row up to here was captured under the old triggers; rows after it under the rebuilt ones.
+            long boundary = connection.readMaxChangeId();
+            deferShapeChanges(emitted, schema.readDatabaseTables(connection), boundary);
         }
         catch (SQLException e) {
             throw new DebeziumException("Failed to reconcile capture triggers after a schema change", e);
@@ -137,6 +149,60 @@ class SQLiteStreamingChangeEventSource
         // afterward. Recording the pre-reconcile value would leave lastSchemaVersion stale and force a
         // redundant no-op reconcile on the next poll.
         lastSchemaVersion = readSchemaVersion();
+    }
+
+    /**
+     * Reconciles the emitted schema with the database after a schema change, deferring the shapes a
+     * backlog still depends on. A table added since the last reconcile is registered now, because every
+     * row that can name it was captured after {@code boundary}. A table whose columns changed, or that was
+     * dropped, keeps its old shape registered and records a swap to apply once streaming passes the
+     * boundary, so rows up to it still render against the shape that captured them.
+     */
+    private void deferShapeChanges(Map<TableId, Table> emitted, Tables database, long boundary) {
+        for (TableId id : database.tableIds()) {
+            Table current = database.forTable(id);
+            Table previous = emitted.get(id);
+            if (previous == null) {
+                schema.registerTable(current);
+            }
+            else if (!previous.retrieveColumnNames().equals(current.retrieveColumnNames())) {
+                pendingSwaps.add(new PendingSwap(boundary, id, current));
+            }
+        }
+        for (TableId id : emitted.keySet()) {
+            if (!database.tableIds().contains(id)) {
+                pendingSwaps.add(new PendingSwap(boundary, id, null));
+            }
+        }
+    }
+
+    /**
+     * Applies every deferred swap whose boundary this change_id has passed, so a row is rendered against
+     * the shape in effect at its position: the old shape up to the boundary, the new shape after it. A
+     * swap with a null shape drops a table the database no longer has.
+     */
+    private void applyDueSwaps(long changeId) {
+        Iterator<PendingSwap> swaps = pendingSwaps.iterator();
+        while (swaps.hasNext()) {
+            PendingSwap swap = swaps.next();
+            if (changeId > swap.boundary) {
+                if (swap.newShape == null) {
+                    schema.evictTable(swap.tableId);
+                }
+                else {
+                    schema.registerTable(swap.newShape);
+                }
+                swaps.remove();
+            }
+        }
+    }
+
+    private Map<TableId, Table> currentShapes() {
+        Map<TableId, Table> shapes = new HashMap<>();
+        for (TableId id : schema.tableIds()) {
+            shapes.put(id, schema.tableFor(id));
+        }
+        return shapes;
     }
 
     private long readSchemaVersion() {
@@ -167,6 +233,8 @@ class SQLiteStreamingChangeEventSource
     }
 
     private void dispatch(SQLitePartition partition, CdcLogRow row) throws InterruptedException {
+        // Adopt any schema change this row has reached before rendering it against the emitted shape.
+        applyDueSwaps(row.changeId());
         // Advance the offset first so a skipped row is not read again on the next poll.
         effectiveOffset.setChangeId(row.changeId());
         Optional<TableId> tableId = resolveTable(row.tableName());
@@ -218,5 +286,19 @@ class SQLiteStreamingChangeEventSource
             offsetActivityMonitor = new SQLiteOffsetActivityMonitor(config.getOffsetActivityMonitorInterval());
         }
         return Optional.of(offsetActivityMonitor);
+    }
+
+    /** A schema change held until streaming passes {@code boundary}. A null {@code newShape} drops the table. */
+    private static final class PendingSwap {
+
+        private final long boundary;
+        private final TableId tableId;
+        private final Table newShape;
+
+        PendingSwap(long boundary, TableId tableId, Table newShape) {
+            this.boundary = boundary;
+            this.tableId = tableId;
+            this.newShape = newShape;
+        }
     }
 }

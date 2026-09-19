@@ -7,7 +7,9 @@ package io.debezium.connector.sqlite;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -155,6 +157,43 @@ public class SQLiteSchemaChangeIT extends AbstractAsyncEngineConnectorTest {
         consumeRecordsByTopic(1, false);
 
         assertThat(streamingLog.countOccurrences("reconciling capture triggers")).isEqualTo(1);
+    }
+
+    @Test
+    public void shouldEmitBacklogRowsCapturedUnderTheOldNameAfterARename() throws Exception {
+        LogInterceptor streamingLog = new LogInterceptor(SQLiteStreamingChangeEventSource.class);
+
+        database.connection().execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, name TEXT)");
+        database.installTriggers("orders");
+
+        Configuration config = Configuration.create()
+                .with(SQLiteConnectorConfig.DATABASE_FILE, database.databaseFile().toString())
+                .with(CommonConnectorConfig.TOPIC_PREFIX, TOPIC_PREFIX)
+                .with(SQLiteConnectorConfig.SNAPSHOT_MODE, "no_data")
+                .build();
+
+        start(SQLiteSourceConnector.class, config);
+        assertConnectorIsRunning();
+        Awaitility.await().atMost(10, TimeUnit.SECONDS)
+                .until(() -> streamingLog.containsMessage("Starting SQLite streaming from change_id 0"));
+
+        // The write and the rename commit together, so the streaming loop first sees them on one poll: the
+        // row is still logged under 'orders' and unstreamed when the rename is reconciled. Unless the old
+        // shape is held until the backlog drains, that row resolves to no table and is dropped for good.
+        Connection jdbc = database.connection().connection();
+        jdbc.setAutoCommit(false);
+        try (Statement statement = jdbc.createStatement()) {
+            statement.execute("INSERT INTO orders (id, name) VALUES (1, 'a')");
+            statement.execute("ALTER TABLE orders RENAME TO orders_v2");
+            jdbc.commit();
+        }
+        finally {
+            jdbc.setAutoCommit(true);
+        }
+
+        List<SourceRecord> records = consumeRecordsByTopic(1, false).recordsForTopic(TOPIC_PREFIX + ".orders");
+        assertThat(records).hasSize(1);
+        assertThat(after(records.get(0)).getString("name")).isEqualTo("a");
     }
 
     @Test
