@@ -110,12 +110,9 @@ public class SQLiteConnection extends JdbcConnection {
     }
 
     /**
-     * Deletes every {@code _debezium_cdc_log} row at or below the given {@code change_id}. Callers must
-     * pass a {@code change_id} that Kafka Connect has durably committed, never one merely dispatched, so
-     * a crash before the commit never loses a row this deletes.
-     *
-     * @param changeId the inclusive upper bound; rows with this id or smaller are removed
-     * @throws SQLException if the delete cannot be run
+     * Deletes every {@code _debezium_cdc_log} row at or below {@code changeId}. Callers pass an id Kafka
+     * Connect has durably committed, never one merely dispatched, so a crash before the commit never
+     * loses a row this deletes.
      */
     public void deleteChangesUpTo(long changeId) throws SQLException {
         String sql = String.format("DELETE FROM %s WHERE %s <= ?", CdcLog.TABLE_NAME, CdcLog.CHANGE_ID);
