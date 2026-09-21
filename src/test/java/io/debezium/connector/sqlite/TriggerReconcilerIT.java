@@ -113,7 +113,7 @@ public class TriggerReconcilerIT {
 
         try (SQLiteConnection connection = new SQLiteConnection(db.databaseFile().toString())) {
             schema.refresh(connection);
-            return TriggerReconciler.reconcile(connection, schema, previouslyMonitoredTables);
+            return TriggerReconciler.reconcile(connection, connectorConfig.getTableFilters().dataCollectionFilter(), previouslyMonitoredTables);
         }
     }
 }

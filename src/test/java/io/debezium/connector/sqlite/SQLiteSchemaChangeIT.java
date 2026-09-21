@@ -192,7 +192,9 @@ public class SQLiteSchemaChangeIT extends AbstractAsyncEngineConnectorTest {
             jdbc.setAutoCommit(true);
         }
 
-        List<SourceRecord> records = consumeRecordsByTopic(1, false).recordsForTopic(TOPIC_PREFIX + ".orders");
+        // The rename also emits a drop and a create schema change event on the bare prefix topic, so the
+        // data row is one of three records consumed; only it lands on the table topic.
+        List<SourceRecord> records = consumeRecordsByTopic(3, false).recordsForTopic(TOPIC_PREFIX + ".orders");
         assertThat(records).hasSize(1);
         assertThat(after(records.get(0)).getString("name")).isEqualTo("a");
     }
@@ -230,7 +232,9 @@ public class SQLiteSchemaChangeIT extends AbstractAsyncEngineConnectorTest {
             jdbc.setAutoCommit(true);
         }
 
-        List<SourceRecord> records = consumeRecordsByTopic(1, false).recordsForTopic(TOPIC_PREFIX + ".orders");
+        // The add column also emits one alter schema change event on the bare prefix topic, so the data row
+        // is one of two records consumed; only it lands on the table topic.
+        List<SourceRecord> records = consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".orders");
         assertThat(records).hasSize(1);
         Struct after = after(records.get(0));
         assertThat(after.getString("name")).isEqualTo("a");
@@ -272,8 +276,9 @@ public class SQLiteSchemaChangeIT extends AbstractAsyncEngineConnectorTest {
             jdbc.setAutoCommit(true);
         }
 
-        // The backlogged row renders under the original two-column shape.
-        List<SourceRecord> oldRows = consumeRecordsByTopic(1, false).recordsForTopic(TOPIC_PREFIX + ".orders");
+        // The recreate also emits one create schema change event on the bare prefix topic, so the backlog
+        // row is one of two records consumed; it renders under the original two-column shape.
+        List<SourceRecord> oldRows = consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".orders");
         assertThat(oldRows).hasSize(1);
         assertThat(after(oldRows.get(0)).getString("name")).isEqualTo("a");
         assertThat(after(oldRows.get(0)).schema().field("extra")).isNull();
