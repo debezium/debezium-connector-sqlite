@@ -32,9 +32,8 @@ public class SQLiteErrorHandler extends ErrorHandler {
     }
 
     /**
-     * Retries only transient SQLite contention, {@code SQLITE_BUSY} and {@code SQLITE_LOCKED}
-     * (including their extended variants). Every other SQLite error, such as a constraint violation or a
-     * corrupted database, is fatal and a retry will not fix it.
+     * Retries only transient SQLite contention, {@code SQLITE_BUSY} and {@code SQLITE_LOCKED} and their
+     * extended variants. Every other error, such as a constraint violation, is fatal.
      */
     @Override
     protected boolean isRetriable(Throwable throwable) {

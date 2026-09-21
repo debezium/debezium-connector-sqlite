@@ -117,10 +117,8 @@ public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
     public static final int DEFAULT_LOG_COMPACTION_THRESHOLD = 10000;
 
     /**
-     * Number of already-committed {@code _debezium_cdc_log} rows the connector lets accumulate before
-     * deleting them. The connector deletes rows up to the last committed {@code change_id} once this
-     * many rows have accumulated since the previous deletion, batching the cleanup instead of running a
-     * delete after every offset commit.
+     * Number of already-committed {@code _debezium_cdc_log} rows to let accumulate before deleting them,
+     * batching the cleanup instead of running a delete after every offset commit.
      */
     public static final Field LOG_COMPACTION_THRESHOLD = Field.create("log.compaction.threshold")
             .withDisplayName("Log compaction threshold")
