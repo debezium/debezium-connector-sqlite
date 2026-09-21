@@ -66,8 +66,8 @@ class SQLiteSnapshotChangeEventSource extends RelationalSnapshotChangeEventSourc
 
     @Override
     protected Set<TableId> getAllTableIds(RelationalSnapshotContext<SQLitePartition, SQLiteOffsetContext> snapshotContext) {
-        // The schema already holds the monitored tables, read and filtered at task startup. Returning
-        // them here avoids a database read so the high-water mark stays the first read of the view.
+        // The schema already holds the monitored tables from task startup; returning them avoids a read so
+        // the high-water mark stays the view's first read.
         return schema.tableIds();
     }
 

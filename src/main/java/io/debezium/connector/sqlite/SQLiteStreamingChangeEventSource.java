@@ -224,10 +224,9 @@ class SQLiteStreamingChangeEventSource
     }
 
     /**
-     * Announces each table the reconcile touched: a created or altered table with its current shape, a
-     * dropped table with the shape it had before the change. The current shape comes from the database
-     * read, since the emitted schema may still hold the old shape until the backlog drains. No literal DDL
-     * is available, so {@code ddl} is always null.
+     * Announces each table the reconcile touched: created or altered with its current shape from the
+     * database read, dropped with the shape it had before. No literal DDL is available, so {@code ddl}
+     * is always null.
      */
     private void dispatchSchemaChangeEvents(SQLitePartition partition, ReconcileResult result,
                                             Map<TableId, Table> emitted, Tables database)
