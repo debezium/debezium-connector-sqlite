@@ -55,6 +55,12 @@ class SQLiteStreamingChangeEventSource
     // backlogged row is still rendered against the shape that captured it rather than the newer one.
     private final List<PendingSwap> pendingSwaps = new ArrayList<>();
 
+    /** The {@code change_id} Kafka Connect has confirmed committed; 0 until the first commit lands. */
+    private volatile long committedChangeId;
+
+    /** The {@code change_id} the log was last compacted up to; 0 until the first compaction. */
+    private long lastCompactedChangeId;
+
     SQLiteStreamingChangeEventSource(SQLiteConnectorConfig config,
                                      SQLiteConnection connection,
                                      SQLiteDatabaseSchema schema,
@@ -105,6 +111,7 @@ class SQLiteStreamingChangeEventSource
         while (context.isRunning()) {
             offsetActivityMonitorService.pulse(partition, offsetContext);
             reconcileIfSchemaChanged();
+            compactIfNeeded();
             List<CdcLogRow> batch = readBatch();
             if (batch.isEmpty()) {
                 metronome.pause();
@@ -222,6 +229,24 @@ class SQLiteStreamingChangeEventSource
         }
     }
 
+    /**
+     * Deletes already-committed rows once enough have accumulated. The bound is {@link #committedChangeId},
+     * never the dispatched offset, so a row not yet offset-committed is never deleted.
+     */
+    private void compactIfNeeded() {
+        long committed = committedChangeId;
+        if (committed - lastCompactedChangeId < config.getLogCompactionThreshold()) {
+            return;
+        }
+        try {
+            connection.deleteChangesUpTo(committed);
+        }
+        catch (SQLException e) {
+            throw new DebeziumException("Failed to compact " + CdcLog.TABLE_NAME, e);
+        }
+        lastCompactedChangeId = committed;
+    }
+
     private List<CdcLogRow> readBatch() {
         try {
             return connection.readChanges(effectiveOffset.getChangeId(), config.getCdcLogBatchSize());
@@ -285,6 +310,15 @@ class SQLiteStreamingChangeEventSource
             offsetActivityMonitor = new SQLiteOffsetActivityMonitor(config.getOffsetActivityMonitorInterval());
         }
         return Optional.of(offsetActivityMonitor);
+    }
+
+    /**
+     * Records the committed {@code change_id} for the poll loop to compact up to. Runs on the commit
+     * thread, so it only stores a volatile field and does no database work of its own.
+     */
+    @Override
+    public void commitOffset(Map<String, ?> partition, Map<String, ?> offset) {
+        committedChangeId = ((Number) offset.get(SQLiteOffsetContext.CHANGE_ID_KEY)).longValue();
     }
 
     /** A schema change held until streaming passes {@code boundary}. A null {@code newShape} drops the table. */
