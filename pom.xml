@@ -10,7 +10,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>io.debezium</groupId>
     <artifactId>debezium-connector-sqlite</artifactId>
-    <version>3.7.0-SNAPSHOT</version>
+    <version>3.7.0.CR1</version>
     <name>Debezium SQLite Connector</name>
     <packaging>jar</packaging>
 
@@ -18,7 +18,7 @@
         <connection>scm:git:git@github.com:debezium/debezium-connector-sqlite.git</connection>
         <developerConnection>scm:git:git@github.com:debezium/debezium-connector-sqlite.git</developerConnection>
         <url>https://github.com/debezium/debezium-connector-sqlite</url>
-        <tag>HEAD</tag>
+        <tag>v3.7.0.CR1</tag>
     </scm>
 
     <issueManagement>
