@@ -35,26 +35,31 @@ public final class TriggerReconciler {
     }
 
     /**
-     * Rebuilds the triggers of every captured table whose installed triggers no longer match its
-     * columns, and returns the names of the tables rebuilt. The table set is read from the database and
-     * filtered, not taken from the connector schema, so it reflects the tables that exist right now rather
-     * than the schema the streaming loop currently emits against.
+     * Rebuilds the triggers of every captured table whose installed triggers no longer match its columns,
+     * and reports the tables created, altered, or dropped. The table set is read from the database and
+     * filtered, not taken from the connector schema. A table dropped outright leaves no orphaned trigger,
+     * so {@code previouslyMonitoredTables} is compared against the current tables to still report it dropped.
      */
-    public static List<String> reconcile(SQLiteConnection connection, TableFilter tableFilter) throws SQLException {
+    public static ReconcileResult reconcile(SQLiteConnection connection, TableFilter tableFilter,
+                                            Set<String> previouslyMonitoredTables)
+            throws SQLException {
         Map<String, String> installed = connection.readConnectorTriggerSql();
         Set<String> monitoredTables = new LinkedHashSet<>();
-        List<String> rebuilt = new ArrayList<>();
+        List<String> created = new ArrayList<>();
+        List<String> altered = new ArrayList<>();
         for (TableId tableId : connection.getAllTableIds(null)) {
             if (!tableFilter.isIncluded(tableId)) {
                 continue;
             }
             String table = tableId.table();
             monitoredTables.add(table);
+            List<String> triggerNames = TriggerGenerator.triggerNames(table);
+            boolean hadInstalledTriggers = triggerNames.stream().anyMatch(installed::containsKey);
             List<String> columns = TriggerInstaller.readColumnNames(connection, table);
             List<String> desired = TriggerGenerator.createTriggers(table, columns);
-            if (!triggersMatch(desired, TriggerGenerator.triggerNames(table), installed)) {
+            if (!triggersMatch(desired, triggerNames, installed)) {
                 TriggerInstaller.rebuild(connection, table);
-                rebuilt.add(table);
+                (hadInstalledTriggers ? altered : created).add(table);
                 LOGGER.info("Rebuilt the capture triggers for table '{}' after a schema change", table);
             }
         }
@@ -62,7 +67,10 @@ public final class TriggerReconciler {
             connection.execute("DROP TRIGGER IF EXISTS " + orphan);
             LOGGER.info("Dropped orphaned capture trigger '{}' left by a table that is no longer monitored", orphan);
         }
-        return rebuilt;
+        List<String> dropped = previouslyMonitoredTables.stream()
+                .filter(table -> !monitoredTables.contains(table))
+                .collect(Collectors.toList());
+        return new ReconcileResult(created, altered, dropped);
     }
 
     static List<String> orphanedTriggers(Set<String> installedTriggerNames, Set<String> monitoredTables) {
