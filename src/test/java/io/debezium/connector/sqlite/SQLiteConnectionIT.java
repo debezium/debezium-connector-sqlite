@@ -99,6 +99,29 @@ class SQLiteConnectionIT {
     }
 
     @Test
+    void deleteChangesUpToRemovesRowsAtOrBelowTheGivenChangeId() throws SQLException {
+        connection.createCdcLogTable();
+        SqliteTestHelper.insertCdcLogRow(connection, "users", 5, CdcLog.OPERATION_CREATE);
+        SqliteTestHelper.insertCdcLogRow(connection, "users", 9, CdcLog.OPERATION_CREATE);
+        SqliteTestHelper.insertCdcLogRow(connection, "users", 7, CdcLog.OPERATION_CREATE);
+
+        connection.deleteChangesUpTo(7);
+
+        assertThat(connection.readChanges(0, 10)).extracting(CdcLogRow::changeId).containsExactly(9L);
+    }
+
+    @Test
+    void deleteChangesUpToBelowEveryRowIsANoOp() throws SQLException {
+        connection.createCdcLogTable();
+        SqliteTestHelper.insertCdcLogRow(connection, "users", 5, CdcLog.OPERATION_CREATE);
+        SqliteTestHelper.insertCdcLogRow(connection, "users", 9, CdcLog.OPERATION_CREATE);
+
+        connection.deleteChangesUpTo(1);
+
+        assertThat(connection.readChanges(0, 10)).extracting(CdcLogRow::changeId).containsExactly(5L, 9L);
+    }
+
+    @Test
     void readSchemaVersionRisesOnDdlAndHoldsOnDml() throws SQLException {
         long initial = connection.readSchemaVersion();
 

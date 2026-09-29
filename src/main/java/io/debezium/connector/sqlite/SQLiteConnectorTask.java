@@ -9,6 +9,7 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.apache.kafka.connect.source.SourceRecord;
@@ -32,7 +33,6 @@ import io.debezium.pipeline.ChangeEventSourceCoordinator;
 import io.debezium.pipeline.DataChangeEvent;
 import io.debezium.pipeline.ErrorHandler;
 import io.debezium.pipeline.EventDispatcher;
-import io.debezium.pipeline.metrics.DefaultChangeEventSourceMetricsFactory;
 import io.debezium.pipeline.notification.NotificationService;
 import io.debezium.pipeline.signal.SignalProcessor;
 import io.debezium.pipeline.spi.Offsets;
@@ -119,7 +119,7 @@ public class SQLiteConnectorTask extends BaseSourceTask<SQLitePartition, SQLiteO
         // write from now on is logged and the handoff stays consistent. This installs triggers on a fresh
         // table and rebuilds them on a table whose columns changed while the connector was down.
         try {
-            TriggerReconciler.reconcile(connection, connectorConfig.getTableFilters().dataCollectionFilter());
+            TriggerReconciler.reconcile(connection, connectorConfig.getTableFilters().dataCollectionFilter(), Set.of());
         }
         catch (SQLException e) {
             throw new DebeziumException("Failed to reconcile the CDC capture triggers on the SQLite database at " + databaseFilePath, e);
@@ -151,6 +151,9 @@ public class SQLiteConnectorTask extends BaseSourceTask<SQLitePartition, SQLiteO
 
         final SQLiteEventMetadataProvider metadataProvider = new SQLiteEventMetadataProvider();
 
+        final SQLiteStreamingChangeEventSourceMetrics streamingMetrics = new SQLiteStreamingChangeEventSourceMetrics(
+                taskContext, queue, metadataProvider, schema::tableIds);
+
         final SignalProcessor<SQLitePartition, SQLiteOffsetContext> signalProcessor = new SignalProcessor<>(
                 SQLiteSourceConnector.class, connectorConfig, Map.of(),
                 getAvailableSignalChannels(),
@@ -180,8 +183,8 @@ public class SQLiteConnectorTask extends BaseSourceTask<SQLitePartition, SQLiteO
                 errorHandler,
                 SQLiteSourceConnector.class,
                 connectorConfig,
-                new SQLiteChangeEventSourceFactory(connectorConfig, snapshotterService, connectionFactory, schema, dispatcher, clock),
-                new DefaultChangeEventSourceMetricsFactory<>(),
+                new SQLiteChangeEventSourceFactory(connectorConfig, snapshotterService, connectionFactory, schema, dispatcher, clock, streamingMetrics),
+                new SQLiteChangeEventSourceMetricsFactory(streamingMetrics),
                 dispatcher,
                 schema,
                 signalProcessor,

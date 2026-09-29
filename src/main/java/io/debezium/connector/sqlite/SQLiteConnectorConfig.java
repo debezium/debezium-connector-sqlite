@@ -113,6 +113,22 @@ public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
             .withDescription("Maximum number of rows to read from the CDC log table per poll. "
                     + "Defaults to " + DEFAULT_CDC_LOG_BATCH_SIZE + ".");
 
+    /** Default number of already-committed rows the connector lets accumulate before compacting the log. */
+    public static final int DEFAULT_LOG_COMPACTION_THRESHOLD = 10000;
+
+    /**
+     * Number of already-committed {@code _debezium_cdc_log} rows to let accumulate before deleting them,
+     * batching the cleanup instead of running a delete after every offset commit.
+     */
+    public static final Field LOG_COMPACTION_THRESHOLD = Field.create("log.compaction.threshold")
+            .withDisplayName("Log compaction threshold")
+            .withType(ConfigDef.Type.INT)
+            .withImportance(ConfigDef.Importance.MEDIUM)
+            .withDefault(DEFAULT_LOG_COMPACTION_THRESHOLD)
+            .withValidation(Field::isPositiveInteger)
+            .withDescription("Number of already-committed rows to let accumulate in the CDC log table "
+                    + "before deleting them. Defaults to " + DEFAULT_LOG_COMPACTION_THRESHOLD + ".");
+
     /** Whether to substitute a type placeholder for an affinity-mismatched value in a non-nullable, no-default column. */
     public static final Field NONNULL_AFFINITY_MISMATCH_FALLBACK = Field.create("nonnull.affinity.mismatch.fallback")
             .withDisplayName("Substitute a placeholder for a non-nullable affinity mismatch")
@@ -142,7 +158,7 @@ public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
     private static final ConfigDefinition CONFIG_DEFINITION = RelationalDatabaseConnectorConfig.CONFIG_DEFINITION.edit()
             .name("SQLite")
             .group(Field.Group.CONNECTION, DATABASE_FILE)
-            .group(Field.Group.CONNECTOR, SNAPSHOT_MODE, CDC_LOG_BATCH_SIZE, NONNULL_AFFINITY_MISMATCH_FALLBACK)
+            .group(Field.Group.CONNECTOR, SNAPSHOT_MODE, CDC_LOG_BATCH_SIZE, LOG_COMPACTION_THRESHOLD, NONNULL_AFFINITY_MISMATCH_FALLBACK)
             .excluding(SCHEMA_INCLUDE_LIST, SCHEMA_EXCLUDE_LIST,
                     HOSTNAME, PORT, USER, PASSWORD, DATABASE_NAME)
             .create();
@@ -185,6 +201,11 @@ public class SQLiteConnectorConfig extends RelationalDatabaseConnectorConfig {
     /** The maximum number of {@code _debezium_cdc_log} rows the streaming source reads per poll. */
     public int getCdcLogBatchSize() {
         return getConfig().getInteger(CDC_LOG_BATCH_SIZE);
+    }
+
+    /** The number of already-committed rows the connector lets accumulate before compacting the log. */
+    public int getLogCompactionThreshold() {
+        return getConfig().getInteger(LOG_COMPACTION_THRESHOLD);
     }
 
     public static ConfigDef configDef() {
