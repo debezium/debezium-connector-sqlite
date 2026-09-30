@@ -45,6 +45,8 @@ class SQLiteStreamingChangeEventSource
     private final EventDispatcher<SQLitePartition, TableId> dispatcher;
     private final Clock clock;
     private final OffsetActivityMonitorService offsetActivityMonitorService;
+    private final int batchSize;
+    private final int compactionThreshold;
     private OffsetActivityMonitor<SQLitePartition, SQLiteOffsetContext> offsetActivityMonitor;
 
     private SQLiteOffsetContext effectiveOffset;
@@ -72,6 +74,8 @@ class SQLiteStreamingChangeEventSource
         this.dispatcher = dispatcher;
         this.clock = clock;
         this.offsetActivityMonitorService = OffsetActivityMonitorService.lookup(config.getServiceRegistry());
+        this.batchSize = config.getCdcLogBatchSize();
+        this.compactionThreshold = config.getLogCompactionThreshold();
     }
 
     /**
@@ -235,7 +239,7 @@ class SQLiteStreamingChangeEventSource
      */
     private void compactIfNeeded() {
         long committed = committedChangeId;
-        if (committed - lastCompactedChangeId < config.getLogCompactionThreshold()) {
+        if (committed - lastCompactedChangeId < compactionThreshold) {
             return;
         }
         try {
@@ -249,7 +253,7 @@ class SQLiteStreamingChangeEventSource
 
     private List<CdcLogRow> readBatch() {
         try {
-            return connection.readChanges(effectiveOffset.getChangeId(), config.getCdcLogBatchSize());
+            return connection.readChanges(effectiveOffset.getChangeId(), batchSize);
         }
         catch (SQLException e) {
             throw new DebeziumException("Failed to read changes from " + CdcLog.TABLE_NAME, e);
