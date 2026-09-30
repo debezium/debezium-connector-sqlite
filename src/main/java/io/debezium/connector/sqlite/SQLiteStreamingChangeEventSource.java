@@ -235,7 +235,8 @@ class SQLiteStreamingChangeEventSource
 
     /**
      * Deletes already-committed rows once enough have accumulated. The bound is {@link #committedChangeId},
-     * never the dispatched offset, so a row not yet offset-committed is never deleted.
+     * never the dispatched offset, so a row not yet offset-committed is never deleted. Compaction only
+     * reclaims space, so a failure is logged and retried on the next poll rather than stopping streaming.
      */
     private void compactIfNeeded() {
         long committed = committedChangeId;
@@ -246,7 +247,9 @@ class SQLiteStreamingChangeEventSource
             connection.deleteChangesUpTo(committed);
         }
         catch (SQLException e) {
-            throw new DebeziumException("Failed to compact " + CdcLog.TABLE_NAME, e);
+            LOGGER.warn("Failed to compact {} up to change_id {}; will retry on the next poll",
+                    CdcLog.TABLE_NAME, committed, e);
+            return;
         }
         lastCompactedChangeId = committed;
     }
