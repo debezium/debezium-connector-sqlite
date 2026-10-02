@@ -7,6 +7,7 @@ package io.debezium.connector.sqlite;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -64,6 +65,18 @@ public final class TriggerGenerator {
         return TRIGGER_SUFFIXES.stream()
                 .map(suffix -> triggerName(tableName, suffix))
                 .collect(Collectors.toList());
+    }
+
+    /** The inverse of {@link #triggerName}; empty if the name is not a connector trigger. */
+    static Optional<String> tableNameFor(String triggerName) {
+        if (!triggerName.startsWith(TRIGGER_PREFIX)) {
+            return Optional.empty();
+        }
+        String withoutPrefix = triggerName.substring(TRIGGER_PREFIX.length());
+        return TRIGGER_SUFFIXES.stream()
+                .filter(suffix -> withoutPrefix.endsWith("_" + suffix))
+                .findFirst()
+                .map(suffix -> withoutPrefix.substring(0, withoutPrefix.length() - suffix.length() - 1));
     }
 
     private static String trigger(String tableName, String suffix, String timing,

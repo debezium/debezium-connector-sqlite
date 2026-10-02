@@ -99,6 +99,7 @@ public class TriggerGeneratorTest {
                 .contains("NEW.\"w\"\"x\"");
     }
 
+    /** The blob-safe value expression the generator emits for one column, per row alias. */
     private static String blobSafe(String alias, String column) {
         String ref = alias + ".\"" + column + "\"";
         return "CASE WHEN typeof(" + ref + ")='blob' THEN json_object('" + CdcLog.BLOB_HEX_MARKER
