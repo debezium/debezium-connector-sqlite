@@ -117,7 +117,6 @@ public class SQLiteSchemaChangeIT extends AbstractAsyncEngineConnectorTest {
 
         database.connection().execute("INSERT INTO orders (id, name, note) VALUES (2, 'b', 'hello')");
 
-        // 2 data rows plus 1 schema change record for the mid-stream ADD COLUMN.
         List<SourceRecord> records = consumeRecordsByTopic(3, false).recordsForTopic(TOPIC_PREFIX + ".orders");
         assertThat(records).hasSize(2);
         assertThat(after(records.get(1)).getString("note")).isEqualTo("hello");
@@ -192,8 +191,7 @@ public class SQLiteSchemaChangeIT extends AbstractAsyncEngineConnectorTest {
             jdbc.setAutoCommit(true);
         }
 
-        // The rename also emits a drop and a create schema change event on the bare prefix topic, so the
-        // data row is one of three records consumed; only it lands on the table topic.
+        // The other two records are the rename's drop and create schema change events.
         List<SourceRecord> records = consumeRecordsByTopic(3, false).recordsForTopic(TOPIC_PREFIX + ".orders");
         assertThat(records).hasSize(1);
         assertThat(after(records.get(0)).getString("name")).isEqualTo("a");
@@ -232,8 +230,6 @@ public class SQLiteSchemaChangeIT extends AbstractAsyncEngineConnectorTest {
             jdbc.setAutoCommit(true);
         }
 
-        // The add column also emits one alter schema change event on the bare prefix topic, so the data row
-        // is one of two records consumed; only it lands on the table topic.
         List<SourceRecord> records = consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".orders");
         assertThat(records).hasSize(1);
         Struct after = after(records.get(0));
@@ -276,8 +272,7 @@ public class SQLiteSchemaChangeIT extends AbstractAsyncEngineConnectorTest {
             jdbc.setAutoCommit(true);
         }
 
-        // The recreate also emits one create schema change event on the bare prefix topic, so the backlog
-        // row is one of two records consumed; it renders under the original two-column shape.
+        // The backlog row still renders under the original two-column shape.
         List<SourceRecord> oldRows = consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".orders");
         assertThat(oldRows).hasSize(1);
         assertThat(after(oldRows.get(0)).getString("name")).isEqualTo("a");
@@ -351,7 +346,6 @@ public class SQLiteSchemaChangeIT extends AbstractAsyncEngineConnectorTest {
 
         database.connection().execute("INSERT INTO audit (id, note) VALUES (1, 'x')");
 
-        // 1 data row plus 1 schema change record for the new table.
         List<SourceRecord> records = consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX + ".audit");
         assertThat(records).hasSize(1);
         assertThat(after(records.get(0)).getString("note")).isEqualTo("x");
@@ -390,7 +384,6 @@ public class SQLiteSchemaChangeIT extends AbstractAsyncEngineConnectorTest {
         // No double capture: the single insert produced exactly one CDC row, under the new name.
         assertThat(tablesLoggedAfter(before)).containsExactly("sales");
 
-        // 1 data row plus 2 schema change records for the rename (a DROP for orders, a CREATE for sales).
         List<SourceRecord> sales = consumeRecordsByTopic(3, false).recordsForTopic(TOPIC_PREFIX + ".sales");
         assertThat(sales).hasSize(1);
         assertThat(after(sales.get(0)).getString("name")).isEqualTo("b");

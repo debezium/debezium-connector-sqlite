@@ -227,11 +227,7 @@ class SQLiteStreamingChangeEventSource
         return emitted.keySet().stream().map(TableId::table).collect(Collectors.toSet());
     }
 
-    /**
-     * Announces each table the reconcile touched: created or altered with its current shape from the
-     * database read, dropped with the shape it had before. No literal DDL is available, so {@code ddl}
-     * is always null.
-     */
+    /** Emits a schema change per table the reconcile touched; a dropped table uses its last emitted shape. */
     private void dispatchSchemaChangeEvents(SQLitePartition partition, ReconcileResult result,
                                             Map<TableId, Table> emitted, Tables database)
             throws InterruptedException {

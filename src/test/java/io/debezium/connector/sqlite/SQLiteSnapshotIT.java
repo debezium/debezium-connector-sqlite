@@ -69,7 +69,7 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
         assertConnectorIsRunning();
 
         // assertRecords=false skips the Avro/Apicurio schema validation, which the connector does not
-        // pull in as a test dependency. 3 data rows plus 1 schema change record for the table.
+        // pull in as a test dependency. Each table also emits one schema change record.
         SourceRecords records = consumeRecordsByTopic(4, false);
         List<SourceRecord> customers = records.recordsForTopic(TOPIC_PREFIX + ".customers");
         assertThat(customers).hasSize(3);
@@ -107,7 +107,6 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
 
-        // 3 data rows plus 1 schema change record per table (orders, products).
         SourceRecords records = consumeRecordsByTopic(5, false);
 
         // Every monitored table is snapshotted, each row as a read record.
@@ -165,7 +164,6 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
 
-        // 2 data rows plus 1 schema change record for the table.
         List<SourceRecord> rows = consumeRecordsByTopic(3, false).recordsForTopic(TOPIC_PREFIX + ".t");
         assertThat(rows).hasSize(2);
 
@@ -199,7 +197,6 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
 
-        // 2 data rows plus 1 schema change record for the table.
         List<SourceRecord> rows = consumeRecordsByTopic(3, false).recordsForTopic(TOPIC_PREFIX + ".t");
         assertThat(rows).hasSize(2);
 
@@ -233,7 +230,6 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
 
-        // 2 data rows plus 1 schema change record for the table.
         SourceRecords records = consumeRecordsByTopic(3, false);
         List<SourceRecord> rows = records.recordsForTopic(TOPIC_PREFIX + ".t");
         assertThat(rows).hasSize(2);
@@ -261,7 +257,6 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
 
-        // 2 data rows plus 1 schema change record for the table.
         assertThat(consumeRecordsByTopic(3, false).recordsForTopic(TOPIC_PREFIX + ".t")).hasSize(2);
 
         // initial_only takes the snapshot and then does not transition to streaming.
@@ -331,7 +326,6 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
 
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
-        // 2 data rows plus 1 schema change record for the table.
         assertThat(consumeRecordsByTopic(3, false).recordsForTopic(TOPIC_PREFIX + ".t")).hasSize(2);
         stopConnector();
 
@@ -359,7 +353,6 @@ public class SQLiteSnapshotIT extends AbstractAsyncEngineConnectorTest {
         start(SQLiteSourceConnector.class, config);
         assertConnectorIsRunning();
 
-        // One data row per table, plus one schema change record per table on the bare topic-prefix topic.
         SourceRecords records = consumeRecordsByTopic(4, false);
         List<SourceRecord> schemaChanges = records.recordsForTopic(TOPIC_PREFIX);
         assertThat(schemaChanges).hasSize(2);

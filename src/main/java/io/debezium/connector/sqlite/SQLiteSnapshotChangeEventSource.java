@@ -57,8 +57,7 @@ class SQLiteSnapshotChangeEventSource extends RelationalSnapshotChangeEventSourc
     public SnapshottingTask getSnapshottingTask(SQLitePartition partition, SQLiteOffsetContext previousOffset) {
         SnapshottingTask task = super.getSnapshottingTask(partition, previousOffset);
         if (task.snapshotData() && !task.snapshotSchema()) {
-            // The stock snapshotter modes skip the schema pass for a non-historized DatabaseSchema. Force
-            // it back on whenever data is actually being snapshotted; leave snapshot.mode=no_data alone.
+            // The stock modes skip the schema pass for a non-historized schema; force it on with the data.
             return new SnapshottingTask(true, task.snapshotData(), task.getDataCollections(), task.getFilterQueries(), task.isOnDemand());
         }
         return task;
@@ -66,8 +65,7 @@ class SQLiteSnapshotChangeEventSource extends RelationalSnapshotChangeEventSourc
 
     @Override
     protected Set<TableId> getAllTableIds(RelationalSnapshotContext<SQLitePartition, SQLiteOffsetContext> snapshotContext) {
-        // The schema already holds the monitored tables from task startup; returning them avoids a read so
-        // the high-water mark stays the view's first read.
+        // Reuse the tables loaded at startup so the high-water mark stays the first read.
         return schema.tableIds();
     }
 
@@ -110,8 +108,7 @@ class SQLiteSnapshotChangeEventSource extends RelationalSnapshotChangeEventSourc
 
     @Override
     protected SchemaChangeEvent getCreateTableEvent(RelationalSnapshotContext<SQLitePartition, SQLiteOffsetContext> snapshotContext, Table table) {
-        // The schema-changes topic key requires a non-null databaseName; snapshotContext.catalogName is
-        // always null for SQLite, so this uses the same logical-name stand-in as SQLiteSourceInfo.database().
+        // SQLite has no catalog name, but the schema-changes topic key needs a non-null databaseName.
         return SchemaChangeEvent.ofSnapshotCreate(snapshotContext.partition, snapshotContext.offset, connectorConfig.getLogicalName(), table);
     }
 
@@ -120,8 +117,7 @@ class SQLiteSnapshotChangeEventSource extends RelationalSnapshotChangeEventSourc
                                                      RelationalSnapshotContext<SQLitePartition, SQLiteOffsetContext> snapshotContext,
                                                      SnapshottingTask snapshottingTask)
             throws Exception {
-        // The base skips this loop for a non-historized schema; this override runs it regardless, so
-        // downstream consumers still get one SchemaChangeEvent per table.
+        // The base skips this for a non-historized schema; run it so each table still gets an event.
         tryStartingSnapshot(snapshotContext);
         for (Iterator<TableId> iterator = getTablesForSchemaChange(snapshotContext).iterator(); iterator.hasNext();) {
             TableId tableId = iterator.next();

@@ -22,10 +22,7 @@ import io.debezium.config.Configuration;
 import io.debezium.embedded.async.AbstractAsyncEngineConnectorTest;
 import io.debezium.junit.logging.LogInterceptor;
 
-/**
- * Integration tests for the {@code SchemaChangeEvent}s the connector emits while streaming, once the
- * trigger reconciler in {@link SQLiteSchemaChangeIT} picks up a mid-stream DDL.
- */
+/** Integration tests for the {@code SchemaChangeEvent}s the connector emits while streaming. */
 public class SQLiteSchemaChangeEventIT extends AbstractAsyncEngineConnectorTest {
 
     private static final String TOPIC_PREFIX = "sqlite_schema_event";
@@ -110,8 +107,7 @@ public class SQLiteSchemaChangeEventIT extends AbstractAsyncEngineConnectorTest 
 
         database.connection().execute("ALTER TABLE orders RENAME TO sales_orders");
 
-        // The rename produces two separate events, since SQLite gives no link between the old and new
-        // name: a DROP for the vanished old name and a CREATE for what looks like a fresh table.
+        // SQLite does not link the old and new names, so a rename is a DROP plus a CREATE.
         List<SourceRecord> events = consumeRecordsByTopic(2, false).recordsForTopic(TOPIC_PREFIX);
         assertThat(events).hasSize(2);
         List<String> types = events.stream()
@@ -126,8 +122,6 @@ public class SQLiteSchemaChangeEventIT extends AbstractAsyncEngineConnectorTest 
         database.installTriggers("orders");
         startStreaming();
 
-        // Both the DDL and the write that depends on it land before the poll loop's next iteration, so
-        // the schema change event and the data event are produced by the same reconcile-then-batch pass.
         database.connection().execute("ALTER TABLE orders ADD COLUMN note TEXT");
         database.connection().execute("INSERT INTO orders (id, name, note) VALUES (1, 'a', 'hello')");
 

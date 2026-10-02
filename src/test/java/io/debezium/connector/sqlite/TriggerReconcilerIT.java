@@ -19,10 +19,7 @@ import io.debezium.connector.common.CdcSourceTaskContext;
 import io.debezium.relational.TableId;
 import io.debezium.spi.topic.TopicNamingStrategy;
 
-/**
- * Verifies that {@link TriggerReconciler#reconcile} classifies each table it touches as created,
- * altered, or dropped, on top of the trigger rebuild {@link TriggerReconcilerTest} already covers.
- */
+/** Verifies that {@link TriggerReconciler#reconcile} classifies tables as created, altered, or dropped. */
 public class TriggerReconcilerIT {
 
     @Test
@@ -55,8 +52,7 @@ public class TriggerReconcilerIT {
 
     @Test
     void reportsADroppedTableAsDroppedEvenWithNoOrphanedTriggersLeftBehind() throws Exception {
-        // A plain DROP TABLE takes its triggers with it, so there is no orphaned trigger to notice; the
-        // table's absence from the previously-monitored set is the only signal.
+        // DROP TABLE removes its triggers too, so only the previously-monitored set reveals it.
         try (SqliteTestHelper db = SqliteTestHelper.create()) {
             db.connection().execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, total REAL)");
             db.installTriggers("orders");
@@ -72,8 +68,7 @@ public class TriggerReconcilerIT {
 
     @Test
     void reportsARenamedAwayTableAsDroppedAndTheNewNameAsCreated() throws Exception {
-        // RENAME TO leaves the old name's triggers attached to the renamed table, an orphan the
-        // reconciler drops separately; the new name is a fresh table as far as reconcile is concerned.
+        // RENAME TO keeps the old name's triggers on the table; the new name counts as created.
         try (SqliteTestHelper db = SqliteTestHelper.create()) {
             db.connection().execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, total REAL)");
             db.installTriggers("orders");

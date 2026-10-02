@@ -67,10 +67,7 @@ public final class TriggerGenerator {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * The table name a generated trigger name belongs to, the inverse of {@link #triggerName}. Empty if
-     * the name does not match the connector's naming scheme.
-     */
+    /** The inverse of {@link #triggerName}; empty if the name is not a connector trigger. */
     static Optional<String> tableNameFor(String triggerName) {
         if (!triggerName.startsWith(TRIGGER_PREFIX)) {
             return Optional.empty();

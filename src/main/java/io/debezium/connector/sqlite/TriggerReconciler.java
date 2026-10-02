@@ -35,10 +35,9 @@ public final class TriggerReconciler {
     }
 
     /**
-     * Rebuilds the triggers of every captured table whose installed triggers no longer match its columns,
-     * and reports the tables created, altered, or dropped. The table set is read from the database and
-     * filtered, not taken from the connector schema. A table dropped outright leaves no orphaned trigger,
-     * so {@code previouslyMonitoredTables} is compared against the current tables to still report it dropped.
+     * Rebuilds the triggers of every captured table whose triggers no longer match its columns, and reports
+     * the tables created, altered, or dropped. A dropped table leaves no orphaned trigger, so it is found by
+     * comparing {@code previouslyMonitoredTables} with the current tables.
      */
     public static ReconcileResult reconcile(SQLiteConnection connection, TableFilter tableFilter,
                                             Set<String> previouslyMonitoredTables)
