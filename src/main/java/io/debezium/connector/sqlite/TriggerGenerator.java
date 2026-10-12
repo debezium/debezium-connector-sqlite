@@ -8,6 +8,7 @@ package io.debezium.connector.sqlite;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -21,6 +22,8 @@ public final class TriggerGenerator {
     static final String TRIGGER_PREFIX = "_debezium_cdc_";
 
     private static final List<String> TRIGGER_SUFFIXES = List.of("insert", "update", "delete");
+
+    private static final Pattern PLAIN_IDENTIFIER = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
 
     /**
      * Columns per {@code json_object} call. It accepts at most 127 arguments, so 63 columns; a wider
@@ -57,8 +60,13 @@ public final class TriggerGenerator {
 
     public static List<String> dropTriggers(String tableName) {
         return TRIGGER_SUFFIXES.stream()
-                .map(suffix -> "DROP TRIGGER IF EXISTS " + triggerName(tableName, suffix))
+                .map(suffix -> dropTrigger(triggerName(tableName, suffix)))
                 .collect(Collectors.toList());
+    }
+
+    /** Drops one trigger by its stored name, which may carry characters a bare identifier cannot. */
+    static String dropTrigger(String triggerName) {
+        return "DROP TRIGGER IF EXISTS " + triggerIdentifier(triggerName);
     }
 
     static List<String> triggerNames(String tableName) {
@@ -83,17 +91,17 @@ public final class TriggerGenerator {
                                   String operation, String oldData, String newData) {
         return String.format("""
                 CREATE TRIGGER IF NOT EXISTS %s
-                AFTER %s ON "%s"
+                AFTER %s ON %s
                 BEGIN
                     INSERT INTO %s (%s)
-                    VALUES ('%s', '%s', %s, %s, %s);
+                    VALUES (%s, '%s', %s, %s, %s);
                 END""",
-                triggerName(tableName, suffix),
+                triggerIdentifier(triggerName(tableName, suffix)),
                 timing,
-                tableName,
+                quoteIdentifier(tableName),
                 CdcLog.TABLE_NAME,
                 TARGET_COLUMNS,
-                tableName,
+                sqlString(tableName),
                 operation,
                 oldData,
                 newData,
@@ -144,7 +152,21 @@ public final class TriggerGenerator {
 
     /** A quoted identifier reference {@code ALIAS."col"}, with any double quote in the name doubled. */
     private static String columnRef(String rowAlias, String column) {
-        return rowAlias + ".\"" + column.replace("\"", "\"\"") + "\"";
+        return rowAlias + "." + quoteIdentifier(column);
+    }
+
+    /** A double-quoted SQL identifier, with any double quote in the name doubled. */
+    static String quoteIdentifier(String name) {
+        return "\"" + name.replace("\"", "\"\"") + "\"";
+    }
+
+    /**
+     * A trigger name as written in DDL. The name embeds the table name, so it is quoted when it is not a
+     * plain identifier. A plain name is left bare so the stored SQL of an existing trigger still matches
+     * what is generated for it, and the reconciler does not see a change.
+     */
+    private static String triggerIdentifier(String triggerName) {
+        return PLAIN_IDENTIFIER.matcher(triggerName).matches() ? triggerName : quoteIdentifier(triggerName);
     }
 
     /** A SQL string literal for the value, with any single quote doubled. */

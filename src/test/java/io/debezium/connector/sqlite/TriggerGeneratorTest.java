@@ -99,6 +99,36 @@ public class TriggerGeneratorTest {
                 .contains("NEW.\"w\"\"x\"");
     }
 
+    @Test
+    void awkwardTableNamesStillProduceWorkingTriggers() throws Exception {
+        // Spaces, a hyphen, a single quote, and a double quote each break an unescaped identifier or literal.
+        for (String table : List.of("order items", "a-b", "it's", "we\"ird")) {
+            try (JdbcConnection connection = memoryConnection()) {
+                connection.execute(
+                        CdcLog.CREATE_TABLE_DDL,
+                        "CREATE TABLE \"" + table.replace("\"", "\"\"") + "\" (id INTEGER PRIMARY KEY, name TEXT)");
+                connection.execute(TriggerGenerator.createTriggers(table, COLUMNS).toArray(new String[0]));
+
+                assertThat(triggerNames(connection))
+                        .containsExactlyInAnyOrderElementsOf(TriggerGenerator.triggerNames(table));
+
+                connection.execute("INSERT INTO \"" + table.replace("\"", "\"\"") + "\" VALUES (1, 'x')");
+                List<String> logged = connection.queryAndMap(
+                        "SELECT " + CdcLog.TABLE_NAME_COLUMN + " FROM " + CdcLog.TABLE_NAME, rs -> {
+                            List<String> names = new ArrayList<>();
+                            while (rs.next()) {
+                                names.add(rs.getString(1));
+                            }
+                            return names;
+                        });
+                assertThat(logged).containsExactly(table);
+
+                connection.execute(TriggerGenerator.dropTriggers(table).toArray(new String[0]));
+                assertThat(triggerNames(connection)).isEmpty();
+            }
+        }
+    }
+
     /** The blob-safe value expression the generator emits for one column, per row alias. */
     private static String blobSafe(String alias, String column) {
         String ref = alias + ".\"" + column + "\"";
