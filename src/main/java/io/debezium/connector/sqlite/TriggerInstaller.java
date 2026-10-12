@@ -85,7 +85,7 @@ public final class TriggerInstaller {
     }
 
     static List<String> readColumnNames(JdbcConnection connection, String table) throws SQLException {
-        return connection.queryAndMap("PRAGMA table_info(" + table + ")", rs -> {
+        return connection.queryAndMap("PRAGMA table_info(" + TriggerGenerator.quoteIdentifier(table) + ")", rs -> {
             List<String> names = new ArrayList<>();
             while (rs.next()) {
                 names.add(rs.getString("name"));

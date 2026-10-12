@@ -63,7 +63,7 @@ public final class TriggerReconciler {
             }
         }
         for (String orphan : orphanedTriggers(installed.keySet(), monitoredTables)) {
-            connection.execute("DROP TRIGGER IF EXISTS " + orphan);
+            connection.execute(TriggerGenerator.dropTrigger(orphan));
             LOGGER.info("Dropped orphaned capture trigger '{}' left by a table that is no longer monitored", orphan);
         }
         List<String> dropped = previouslyMonitoredTables.stream()

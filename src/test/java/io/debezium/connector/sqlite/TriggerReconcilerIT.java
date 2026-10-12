@@ -7,7 +7,9 @@ package io.debezium.connector.sqlite;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -79,6 +81,28 @@ public class TriggerReconcilerIT {
             assertThat(result.dropped()).containsExactly("orders");
             assertThat(result.created()).containsExactly("sales_orders");
             assertThat(result.altered()).isEmpty();
+        }
+    }
+
+    @Test
+    void dropsTheOrphanedTriggersOfARenamedTableWhoseNameIsNotAPlainIdentifier() throws Exception {
+        try (SqliteTestHelper db = SqliteTestHelper.create()) {
+            db.connection().execute("CREATE TABLE \"order items\" (id INTEGER PRIMARY KEY, total REAL)");
+            db.installTriggers("order items");
+            db.connection().execute("ALTER TABLE \"order items\" RENAME TO sales_orders");
+
+            ReconcileResult result = reconcile(db, Set.of("order items"));
+
+            assertThat(result.dropped()).containsExactly("order items");
+            assertThat(result.created()).containsExactly("sales_orders");
+            List<String> remaining = db.connection().queryAndMap("SELECT name FROM sqlite_master WHERE type='trigger'", rs -> {
+                List<String> names = new ArrayList<>();
+                while (rs.next()) {
+                    names.add(rs.getString(1));
+                }
+                return names;
+            });
+            assertThat(remaining).containsExactlyInAnyOrderElementsOf(TriggerGenerator.triggerNames("sales_orders"));
         }
     }
 
