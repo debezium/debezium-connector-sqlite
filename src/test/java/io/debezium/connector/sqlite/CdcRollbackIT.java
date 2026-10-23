@@ -14,6 +14,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import io.debezium.doc.FixFor;
 import io.debezium.jdbc.JdbcConnection;
 
 /**
@@ -27,6 +28,7 @@ import io.debezium.jdbc.JdbcConnection;
 public class CdcRollbackIT {
 
     @Test
+    @FixFor("debezium/dbz#2933")
     void rolledBackTransactionIsNeverListedInTheCdcLog() throws Exception {
         try (SqliteTestHelper helper = SqliteTestHelper.create();
                 SQLiteConnection writer = new SQLiteConnection(helper.databaseFile().toString())) {
