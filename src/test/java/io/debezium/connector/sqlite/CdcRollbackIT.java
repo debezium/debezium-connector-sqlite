@@ -55,6 +55,17 @@ public class CdcRollbackIT {
 
             assertThat(readCdcOperations(db)).isEmpty();
             assertThat(readCustomerIds(db)).isEmpty();
+
+            try (Statement statement = writer.connection().createStatement()) {
+                statement.executeUpdate("INSERT INTO customers (id, name) VALUES (2, 'Carol')");
+            }
+            assertThat(readCdcOperations(writer)).containsExactly(CdcLog.OPERATION_CREATE);
+            assertThat(readCustomerIds(writer)).containsExactly(2L);
+
+            writer.connection().commit();
+
+            assertThat(readCdcOperations(db)).containsExactly(CdcLog.OPERATION_CREATE);
+            assertThat(readCustomerIds(db)).containsExactly(2L);
         }
     }
 
