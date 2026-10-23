@@ -17,12 +17,11 @@ import org.junit.jupiter.api.Test;
 import io.debezium.jdbc.JdbcConnection;
 
 /**
- * Proves a rolled-back write is never listed in {@code _debezium_cdc_log}. The
- * capture trigger inserts
- * its log row inside the writer's own transaction, so while the transaction is
- * open no other connection
- * can see its rows, and rolling the transaction back undoes the log rows along
- * with the data change.
+ * Proves a rolled-back write is never listed in {@code _debezium_cdc_log}.
+ * The capture trigger inserts its log row inside the writer's own transaction,
+ * so while the transaction is open and not committed, no other connection can
+ * see its rows (due to WAL snapshot isolation enabled by {@code SqliteTestHelper.create()}).
+ * Rolling the transaction back then undoes the log rows along with the data change.
  * It uses a real temp database with two connections, so it runs under Failsafe.
  */
 public class CdcRollbackIT {
