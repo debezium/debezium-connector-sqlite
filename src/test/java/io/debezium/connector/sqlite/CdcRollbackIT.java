@@ -37,12 +37,17 @@ public class CdcRollbackIT {
             helper.installTriggers("customers");
             writer.connect();
             writer.connection().setAutoCommit(false);
+
             try (Statement statement = writer.connection().createStatement()) {
                 statement.executeUpdate("INSERT INTO customers (id, name) VALUES (1, 'Alice')");
                 statement.executeUpdate("UPDATE customers SET name = 'Alicia' WHERE id = 1");
-                statement.executeUpdate("DELETE FROM customers WHERE id = 1");
             }
 
+            assertThat(readCdcOperations(writer)).containsExactly(
+                    CdcLog.OPERATION_CREATE,
+                    CdcLog.OPERATION_UPDATE);
+
+            assertThat(readCustomerIds(writer)).containsExactly(1L);
             assertThat(readCdcOperations(db)).isEmpty();
             assertThat(readCustomerIds(db)).isEmpty();
 
