@@ -63,7 +63,6 @@ public class CdcRollbackIT {
             assertThat(readCustomerIds(writer)).containsExactly(2L);
 
             assertThat(readCustomerIds(db)).isEmpty();
-            assertThat(readCustomerIds(db)).isEmpty();
 
             writer.connection().commit();
 
