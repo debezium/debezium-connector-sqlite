@@ -85,7 +85,7 @@ public class CdcRollbackIT {
         });
     }
 
-    /** The ids of every row left in the source table, in insert order. */
+    /** The ids of every row in the source table, ordered by id. */
     private static List<Long> readCustomerIds(JdbcConnection db) throws SQLException {
         return db.queryAndMap("SELECT id FROM customers ORDER BY id", rs -> {
             List<Long> ids = new ArrayList<>();
